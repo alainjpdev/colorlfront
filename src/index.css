@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Estilos globales para tipografía */
+body {
+  color: rgb(13, 109, 177);
+}
+
+/* Asegurar que los elementos de texto usen el color de marca */
+.text-brand-blue {
+  color: rgb(13, 109, 177);
+}

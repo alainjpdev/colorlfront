@@ -57,3 +57,46 @@ export interface Module {
   totalLessons: number;
   completedLessons: number;
 }
+
+export interface QuotationItem {
+  productId: string;
+  code: string;
+  title: string;
+  price: number;
+  quantity: number;
+  total: number;
+}
+
+export interface Quotation {
+  id: string;
+  quotationName: string;
+  clientName: string;
+  projectName: string;
+  total: number;
+  subtotal: number;
+  discount: number;
+  discountType: 'percentage' | 'amount';
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  createdAt: string;
+  validUntil: string;
+  items: QuotationItem[];
+  createdById: string;
+  createdBy: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  };
+}
+
+export interface CreateQuotationData {
+  quotationName: string;
+  clientName: string;
+  projectName: string;
+  total: number;
+  subtotal: number;
+  discount?: number;
+  discountType?: 'percentage' | 'amount';
+  validUntil?: string;
+  items: QuotationItem[];
+}

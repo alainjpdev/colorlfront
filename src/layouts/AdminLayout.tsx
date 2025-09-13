@@ -1,26 +1,56 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { BookOpen, Users, BarChart3, Settings, User, LogOut, Home, UserPlus, Layers, FileText, ClipboardList, ExternalLink, Database, ChevronLeft, ChevronRight, FileText as FileTextIcon, Building2, CheckSquare } from 'lucide-react';
+import { BookOpen, Users, BarChart3, Settings, User, LogOut, Home, UserPlus, Layers, FileText, ClipboardList, ExternalLink, Database, ChevronLeft, ChevronRight, FileText as FileTextIcon, Building2, CheckSquare, ShoppingCart, Plus, List } from 'lucide-react';
 import { useDarkMode } from '../hooks/useDarkMode';
 import { Moon, Sun } from 'lucide-react';
 import logo from '../assets/logo.webp';
+
+interface NavigationItem {
+  to?: string;
+  key?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  submenu?: {
+    to: string;
+    icon: React.ComponentType<{ className?: string }>;
+    label: string;
+  }[];
+}
 
 export const AdminLayout: React.FC = () => {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [dark, setDark] = useDarkMode();
   const [collapsed, setCollapsed] = React.useState(false);
+  const [expandedMenus, setExpandedMenus] = React.useState<string[]>([]);
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
 
-  const navigationItems = [
+  const toggleSubmenu = (menuKey: string) => {
+    setExpandedMenus(prev => 
+      prev.includes(menuKey) 
+        ? prev.filter(key => key !== menuKey)
+        : [...prev, menuKey]
+    );
+  };
+
+  const navigationItems: NavigationItem[] = [
     { to: '/dashboard', icon: Home, label: 'Panel de Control' },
     { to: '/dashboard/users', icon: Users, label: 'Usuarios' },
     { to: '/dashboard/quotations', icon: FileTextIcon, label: 'Cotizaciones' },
+    { 
+      key: 'orders', 
+      icon: ShoppingCart, 
+      label: 'Órdenes',
+      submenu: [
+        { to: '/dashboard/orders', icon: List, label: 'Listado' },
+        { to: '/dashboard/orders/create', icon: Plus, label: 'Crear Orden' }
+      ]
+    },
     { to: '/dashboard/crm', icon: Building2, label: 'CRM' },
     { to: '/dashboard/todo', icon: CheckSquare, label: 'To Do' },
     // { to: '/dashboard/whatsapp', icon: MessageCircle, label: 'WhatsApp' }, // Oculto temporalmente
@@ -87,32 +117,89 @@ export const AdminLayout: React.FC = () => {
           )}
           {/* Navigation */}
           <nav className="flex-1 px-2 py-4 space-y-2">
-            {navigationItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/dashboard'}
-                className={({ isActive }) =>
-                  `flex items-center ${collapsed ? 'justify-center' : ''} px-3 py-2 rounded-lg text-sm font-medium transition-colors group relative ` +
-                  (isActive
-                    ? 'bg-accent/10 text-accent'
-                    : 'text-text-secondary hover:bg-hover hover:text-text')
-                }
-                title={collapsed ? item.label : ''}
-              >
-                <item.icon className={`w-5 h-5 transition-all duration-200 ${
-                  collapsed ? 'mr-0' : 'mr-0'
-                }`} />
-                {!collapsed && <span className="ml-3">{item.label}</span>}
-                
-                {/* Tooltip cuando está colapsado */}
-                {collapsed && (
-                  <div className="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
-                    {item.label}
+            {navigationItems.map((item) => {
+              // Si tiene submenú
+              if (item.submenu) {
+                const isExpanded = expandedMenus.includes(item.key!);
+                return (
+                  <div key={item.key}>
+                    <button
+                      onClick={() => !collapsed && toggleSubmenu(item.key!)}
+                      className={`flex items-center w-full ${collapsed ? 'justify-center' : ''} px-3 py-2 rounded-lg text-sm font-medium transition-colors group relative text-text-secondary hover:bg-hover hover:text-text`}
+                      title={collapsed ? item.label : ''}
+                    >
+                      <item.icon className={`w-5 h-5 transition-all duration-200 ${
+                        collapsed ? 'mr-0' : 'mr-0'
+                      }`} />
+                      {!collapsed && (
+                        <>
+                          <span className="ml-3">{item.label}</span>
+                          <ChevronRight className={`w-4 h-4 ml-auto transition-transform duration-200 ${
+                            isExpanded ? 'rotate-90' : ''
+                          }`} />
+                        </>
+                      )}
+                      
+                      {/* Tooltip cuando está colapsado */}
+                      {collapsed && (
+                        <div className="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                          {item.label}
+                        </div>
+                      )}
+                    </button>
+                    
+                    {/* Submenú */}
+                    {!collapsed && isExpanded && (
+                      <div className="ml-4 mt-1 space-y-1">
+                        {item.submenu.map((subItem) => (
+                          <NavLink
+                            key={subItem.to}
+                            to={subItem.to}
+                            className={({ isActive }) =>
+                              `flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors group relative ` +
+                              (isActive
+                                ? 'bg-accent/10 text-accent'
+                                : 'text-text-secondary hover:bg-hover hover:text-text')
+                            }
+                          >
+                            <subItem.icon className="w-4 h-4 mr-3" />
+                            <span>{subItem.label}</span>
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </NavLink>
-            ))}
+                );
+              }
+              
+              // Si es un enlace normal
+              return (
+                <NavLink
+                  key={item.to!}
+                  to={item.to!}
+                  end={item.to === '/dashboard'}
+                  className={({ isActive }) =>
+                    `flex items-center ${collapsed ? 'justify-center' : ''} px-3 py-2 rounded-lg text-sm font-medium transition-colors group relative ` +
+                    (isActive
+                      ? 'bg-accent/10 text-accent'
+                      : 'text-text-secondary hover:bg-hover hover:text-text')
+                  }
+                  title={collapsed ? item.label : ''}
+                >
+                  <item.icon className={`w-5 h-5 transition-all duration-200 ${
+                    collapsed ? 'mr-0' : 'mr-0'
+                  }`} />
+                  {!collapsed && <span className="ml-3">{item.label}</span>}
+                  
+                  {/* Tooltip cuando está colapsado */}
+                  {collapsed && (
+                    <div className="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                      {item.label}
+                    </div>
+                  )}
+                </NavLink>
+              );
+            })}
           </nav>
           {/* Logout */}
           <div className={`border-t border-border transition-all duration-200 ${

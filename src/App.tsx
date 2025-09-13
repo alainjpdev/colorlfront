@@ -28,6 +28,8 @@ import Profile from './pages/dashboard/Profile';
 import NotFound from './pages/NotFound';
 import Notion from './pages/dashboard/Notion';
 import { Quotations } from './pages/dashboard/Quotations';
+import Orders from './pages/dashboard/Orders';
+import CreateOrder from './pages/dashboard/CreateOrder';
 import { CRM } from './pages/dashboard/CRM';
 import { WhatsApp } from './pages/dashboard/WhatsApp';
 import { Todo } from './pages/dashboard/Todo';
@@ -170,6 +172,22 @@ const App: React.FC = () => {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <Quotations />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="orders" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <Orders />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="orders/create" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <CreateOrder />
                 </ProtectedRoute>
               } 
             />

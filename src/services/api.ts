@@ -111,6 +111,33 @@ export const dashboardAPI = {
 };
 
 // Servicios de salud y información del sistema
+export const quotationAPI = {
+  getQuotations: async () => {
+    const response = await apiClient.get('/api/quotations');
+    return response.data;
+  },
+  
+  getQuotation: async (id: string) => {
+    const response = await apiClient.get(`/api/quotations/${id}`);
+    return response.data;
+  },
+  
+  createQuotation: async (quotationData: any) => {
+    const response = await apiClient.post('/api/quotations', quotationData);
+    return response.data;
+  },
+  
+  updateQuotation: async (id: string, quotationData: any) => {
+    const response = await apiClient.put(`/api/quotations/${id}`, quotationData);
+    return response.data;
+  },
+  
+  deleteQuotation: async (id: string) => {
+    const response = await apiClient.delete(`/api/quotations/${id}`);
+    return response.data;
+  }
+};
+
 export const systemAPI = {
   health: async () => {
     const response = await apiClient.get('/api/health');

@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { Plus, Search, Filter, Download, Eye, Edit, Trash2, RefreshCw, Calculator, Save, Mail, FileText } from 'lucide-react';
+import { Plus, Search, Filter, Download, Eye, Edit, Trash2, RefreshCw, Calculator, Save, Mail, FileText, CheckCircle, AlertCircle } from 'lucide-react';
+import { quotationAPI } from '../../services/api';
+import { Quotation, CreateQuotationData } from '../../types';
 
 // Importar el logo para el PDF
 import logoImage from '../../assets/logo.webp';
 
 export const Quotations: React.FC = () => {
   const [products, setProducts] = useState<any[]>([]);
-  const [quotations, setQuotations] = useState<any[]>([]);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [currentQuotation, setCurrentQuotation] = useState<any>({
     clientName: '',
     projectName: '',
+    quotationName: '', // Nombre específico para la cotización
     items: [],
     total: 0,
     subtotal: 0,
@@ -24,6 +27,11 @@ export const Quotations: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showQuotationForm, setShowQuotationForm] = useState(true);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [tempQuotationName, setTempQuotationName] = useState('');
+  const [showQuotationsModal, setShowQuotationsModal] = useState(false);
+  const [isEditingExisting, setIsEditingExisting] = useState(false);
+  const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
@@ -32,6 +40,10 @@ export const Quotations: React.FC = () => {
   // Estados para clientes del CRM
   const [crmClients, setCrmClients] = useState<any[]>([]);
   const [crmLoading, setCrmLoading] = useState(false);
+  
+  // Estados para autenticación OAuth2 (copiados de Todo.tsx)
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   
   // Estados para búsqueda de productos
   const [productSearchTerm, setProductSearchTerm] = useState('');
@@ -58,6 +70,10 @@ export const Quotations: React.FC = () => {
   const GOOGLE_SHEET_ID = '1OkUGLzVwwafRQmdIwqE0KRWLdXS8EyWrdKkAaBWijCI'; // Tu Google Sheet real
   const GOOGLE_SHEET_NAME = 'Sheet1'; // Nombre de la hoja por defecto
   const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY; // API Key desde .env
+  
+  // Configuración OAuth2 (copiada de Todo.tsx)
+  const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
   
   // Configuración del CRM (Google Sheets)
   const CRM_SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID || '1_Uwb2TZ8L5OB20C7NEn01YZGWyjXINRLuZ6KH9ND-yA';
@@ -115,6 +131,153 @@ export const Quotations: React.FC = () => {
       console.error('Error al agregar cliente:', err);
       alert('❌ Error al agregar cliente: ' + err.message);
     }
+  };
+
+  // Funciones de autenticación OAuth2 (copiadas de Todo.tsx)
+  const authenticateWithGoogle = async () => {
+    if (!GOOGLE_CLIENT_ID) {
+      setError('Google Client ID no configurado');
+      return;
+    }
+
+    try {
+      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${GOOGLE_CLIENT_ID}&` +
+        `redirect_uri=${encodeURIComponent(window.location.origin + '/dashboard/quotations')}&` +
+        `scope=${encodeURIComponent('https://www.googleapis.com/auth/spreadsheets')}&` +
+        `response_type=code&` +
+        `access_type=offline&` +
+        `state=${encodeURIComponent('quotations_auth')}&` +
+        `prompt=consent`;
+
+      window.location.href = googleAuthUrl;
+    } catch (err) {
+      console.error('Error en autenticación:', err);
+      setError('Error en la autenticación con Google');
+    }
+  };
+
+  // Función para intercambiar código por tokens
+  const exchangeCodeForTokens = async (code: string) => {
+    try {
+      const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID!,
+          client_secret: GOOGLE_CLIENT_SECRET!,
+          code: code,
+          grant_type: 'authorization_code',
+          redirect_uri: window.location.origin + '/dashboard/quotations'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al intercambiar código por tokens');
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      console.error('Error al intercambiar código:', err);
+      throw err;
+    }
+  };
+
+  // Función para guardar tokens en localStorage
+  const saveTokensToStorage = (accessToken: string, refreshToken?: string, expiresIn?: number) => {
+    try {
+      const expiryTime = expiresIn ? Date.now() + (expiresIn * 1000) : Date.now() + (3600 * 1000);
+      localStorage.setItem('google_access_token_quotations', accessToken);
+      localStorage.setItem('google_token_expiry_quotations', expiryTime.toString());
+      
+      if (refreshToken) {
+        localStorage.setItem('google_refresh_token_quotations', refreshToken);
+      }
+    } catch (err) {
+      console.error('Error al guardar tokens:', err);
+    }
+  };
+
+  // Función para renovar token usando refresh token
+  const refreshAccessToken = async () => {
+    try {
+      const refreshToken = localStorage.getItem('google_refresh_token_quotations');
+      if (!refreshToken) {
+        throw new Error('No hay refresh token disponible');
+      }
+
+      const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID!,
+          client_secret: GOOGLE_CLIENT_SECRET!,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al renovar token');
+      }
+
+      const data = await response.json();
+      saveTokensToStorage(data.access_token, refreshToken, data.expires_in);
+      setAccessToken(data.access_token);
+      
+      return data.access_token;
+    } catch (err) {
+      console.error('Error al renovar token:', err);
+      // Si falla la renovación, limpiar tokens y requerir nueva autorización
+      localStorage.removeItem('google_access_token_quotations');
+      localStorage.removeItem('google_refresh_token_quotations');
+      localStorage.removeItem('google_token_expiry_quotations');
+      setAccessToken(null);
+      setIsAuthenticated(false);
+      throw err;
+    }
+  };
+
+  // Función para verificar si el token es válido
+  const isTokenValid = () => {
+    try {
+      const token = localStorage.getItem('google_access_token_quotations');
+      const expiry = localStorage.getItem('google_token_expiry_quotations');
+      
+      if (!token || !expiry) return false;
+      
+      const now = Date.now();
+      const expiryTime = parseInt(expiry);
+      
+      return now < expiryTime;
+    } catch (err) {
+      console.error('Error al verificar token:', err);
+      return false;
+    }
+  };
+
+  // Función para obtener token válido (renovando si es necesario)
+  const getValidToken = async () => {
+    if (accessToken && isTokenValid()) {
+      return accessToken;
+    }
+    
+    if (accessToken && !isTokenValid()) {
+      try {
+        console.log('🔄 Token expirado, renovando...');
+        return await refreshAccessToken();
+      } catch (err) {
+        console.error('Error al renovar token:', err);
+        throw new Error('No se pudo renovar el token de acceso');
+      }
+    }
+    
+    throw new Error('No hay token de acceso disponible');
   };
 
   // Función para obtener clientes del CRM
@@ -188,10 +351,25 @@ export const Quotations: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // URL de la API de Google Sheets
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
+      // Usar OAuth2 si está disponible, sino API Key
+      let url: string;
+      let headers: HeadersInit = {};
       
-      const response = await fetch(url);
+      if (accessToken) {
+        try {
+          const validToken = await getValidToken();
+          url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}`;
+          headers['Authorization'] = `Bearer ${validToken}`;
+        } catch (err) {
+          console.error('Error al obtener token válido:', err);
+          // Fallback a API Key
+          url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
+        }
+      } else {
+        url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
+      }
+      
+      const response = await fetch(url, { headers });
       
       if (!response.ok) {
         throw new Error('Error al obtener datos del Google Sheet');
@@ -240,29 +418,31 @@ export const Quotations: React.FC = () => {
 
   // Función para obtener valor de columna
   const getColumnValue = (item: any, columnName: string) => {
-    // Buscar el valor por diferentes variaciones del nombre de columna
-    const variations = [
+    // Mapeo de las nuevas columnas del Google Sheet
+    const columnMappings: { [key: string]: string[] } = {
+      'sku': ['sku', 'codigointerno', 'codigo', 'code'],
+      'categoria': ['categoria', 'category', 'categoría'],
+      'nombre': ['nombredelproducto', 'nombre', 'titulo', 'title', 'producto', 'product'],
+      'precio': ['preciopublicoads', 'precio', 'price', 'nuevosprecioscolorland', 'preciopublico'],
+      'descripcion': ['descripcion', 'description', 'desc', 'detalle'],
+      // Mapeos adicionales para compatibilidad
+      'clientName': ['nombrecliente', 'cliente', 'client'],
+      'projectName': ['nombreproyecto', 'proyecto', 'project'],
+      'totalAmount': ['valor', 'precio', 'total'],
+      'status': ['situacion', 'estado', 'status'],
+      'createdAt': ['fecha', 'date', 'created'],
+      'validUntil': ['expiracion', 'expiration', 'valido']
+    };
+    
+    // Obtener las variaciones para la columna solicitada
+    const variations = columnMappings[columnName] || [
       columnName,
       columnName.toLowerCase(),
       columnName.replace(/\s+/g, ''),
       columnName.toLowerCase().replace(/\s+/g, ''),
-      // Variaciones comunes en español
-      columnName === 'clientName' ? 'cliente' : null,
-      columnName === 'projectName' ? 'proyecto' : null,
-      columnName === 'totalAmount' ? 'monto' : null,
-      columnName === 'status' ? 'estado' : null,
-      columnName === 'createdAt' ? 'fechacreacion' : null,
-      columnName === 'validUntil' ? 'validaHasta' : null,
-      // Variaciones adicionales
-      columnName === 'clientName' ? 'nombrecliente' : null,
-      columnName === 'projectName' ? 'nombreproyecto' : null,
-      columnName === 'totalAmount' ? 'valor' : null,
-      columnName === 'totalAmount' ? 'precio' : null,
-      columnName === 'status' ? 'situacion' : null,
-      columnName === 'createdAt' ? 'fecha' : null,
-      columnName === 'validUntil' ? 'expiracion' : null,
-    ].filter(Boolean);
+    ];
     
+    // Buscar el valor en las variaciones
     for (const variation of variations) {
       if (variation && item[variation] !== undefined && item[variation] !== '') {
         return item[variation];
@@ -283,11 +463,12 @@ export const Quotations: React.FC = () => {
     }
 
     const results = products.filter(product => {
-      const title = getColumnValue(product, 'titulo')?.toLowerCase() || '';
-      const code = getColumnValue(product, 'codigointerno')?.toLowerCase() || '';
+      const title = getColumnValue(product, 'nombre')?.toLowerCase() || '';
+      const sku = getColumnValue(product, 'sku')?.toLowerCase() || '';
+      const categoria = getColumnValue(product, 'categoria')?.toLowerCase() || '';
       const searchLower = searchTerm.toLowerCase();
       
-      return title.includes(searchLower) || code.includes(searchLower);
+      return title.includes(searchLower) || sku.includes(searchLower) || categoria.includes(searchLower);
     });
 
     setSearchResults(results);
@@ -325,11 +506,13 @@ export const Quotations: React.FC = () => {
       // Agregar nuevo producto
       const newItem = {
         productId: product.id,
-        code: getColumnValue(product, 'codigointerno'),
-        title: getColumnValue(product, 'titulo'),
-        price: parseFloat(getColumnValue(product, 'nuevosprecioscolorland').replace(/[^\d.-]/g, '')) || 0,
+        code: getColumnValue(product, 'sku'),
+        title: getColumnValue(product, 'nombre'),
+        categoria: getColumnValue(product, 'categoria'),
+        descripcion: getColumnValue(product, 'descripcion'),
+        price: parseFloat(getColumnValue(product, 'precio').replace(/[^\d.-]/g, '')) || 0,
         quantity: quantity,
-        total: (parseFloat(getColumnValue(product, 'nuevosprecioscolorland').replace(/[^\d.-]/g, '')) || 0) * quantity
+        total: (parseFloat(getColumnValue(product, 'precio').replace(/[^\d.-]/g, '')) || 0) * quantity
       };
       
       const newSubtotal = currentQuotation.subtotal + newItem.total;
@@ -386,10 +569,151 @@ export const Quotations: React.FC = () => {
     });
   };
 
-  // Cargar datos al montar el componente
+  // Función para cargar cotizaciones desde la base de datos
+  const fetchQuotations = async () => {
+    try {
+      setLoading(true);
+      const quotationsData = await quotationAPI.getQuotations();
+      setQuotations(quotationsData);
+      console.log('✅ Cotizaciones cargadas desde la base de datos:', quotationsData.length);
+    } catch (err) {
+      console.error('Error al cargar cotizaciones:', err);
+      setError('Error al cargar cotizaciones desde la base de datos');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Función para eliminar cotización
+  const deleteQuotation = async (quotationId: string) => {
+    if (!confirm('¿Estás seguro de que quieres eliminar esta cotización? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    try {
+      console.log('🗑️ Eliminando cotización:', quotationId);
+      await quotationAPI.deleteQuotation(quotationId);
+      
+      // Actualizar estado local removiendo la cotización eliminada
+      setQuotations(quotations.filter(q => q.id !== quotationId));
+      
+      console.log('✅ Cotización eliminada exitosamente');
+      alert('✅ Cotización eliminada exitosamente');
+    } catch (err) {
+      console.error('Error al eliminar cotización:', err);
+      alert('❌ Error al eliminar cotización: ' + (err instanceof Error ? err.message : 'Error desconocido'));
+    }
+  };
+
+  const openQuotationInForm = (quotation: Quotation) => {
+    // Cargar la cotización seleccionada en el formulario
+    setCurrentQuotation({
+      clientName: quotation.clientName,
+      projectName: quotation.projectName,
+      quotationName: quotation.quotationName, // Mantener el nombre original
+      items: quotation.items,
+      total: quotation.total,
+      subtotal: quotation.subtotal,
+      discount: quotation.discount,
+      discountType: quotation.discountType,
+      date: new Date().toISOString().split('T')[0]
+    });
+    
+    // Marcar que estamos editando una cotización existente
+    setIsEditingExisting(true);
+    setEditingQuotationId(quotation.id);
+    
+    // Cerrar el modal de cotizaciones
+    setShowQuotationsModal(false);
+  };
+
+  // Efecto para manejar OAuth2 y cargar datos (copiado de Todo.tsx)
   useEffect(() => {
-    fetchGoogleSheetData();
-    fetchCrmClients();
+    const handleOAuthCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      const state = urlParams.get('state');
+      
+      if (code && state === 'quotations_auth') {
+        console.log('🔑 Código de autorización recibido:', code);
+        
+        try {
+          const tokens = await exchangeCodeForTokens(code);
+          console.log('🔑 Tokens obtenidos:', tokens);
+          
+          saveTokensToStorage(tokens.access_token, tokens.refresh_token, tokens.expires_in);
+          setAccessToken(tokens.access_token);
+          setIsAuthenticated(true);
+          
+          // Limpiar la URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+          
+          // Cargar datos después de autenticación
+          fetchGoogleSheetData();
+          fetchCrmClients();
+          fetchQuotations();
+        } catch (err) {
+          console.error('Error al intercambiar código por tokens:', err);
+          setError('Error en la autenticación con Google');
+        }
+      }
+    };
+
+    const loadData = async () => {
+      console.log('🔄 Cargando datos de cotizaciones...');
+      
+      // Verificar si hay token válido
+      if (isTokenValid()) {
+        const token = localStorage.getItem('google_access_token_quotations');
+        setAccessToken(token);
+        setIsAuthenticated(true);
+        console.log('🔑 Token OAuth2 válido encontrado, cargando desde Google Sheets...');
+        fetchGoogleSheetData();
+        fetchCrmClients();
+        fetchQuotations();
+      } else {
+        // Token expirado o no existe, intentar renovar si hay refresh token
+        const refreshToken = localStorage.getItem('google_refresh_token_quotations');
+        if (refreshToken) {
+          console.log('🔄 Token expirado, intentando renovar con refresh token...');
+          try {
+            const newToken = await refreshAccessToken();
+            setAccessToken(newToken);
+            setIsAuthenticated(true);
+            console.log('✅ Token renovado exitosamente, cargando desde Google Sheets...');
+            fetchGoogleSheetData();
+            fetchCrmClients();
+            fetchQuotations();
+            return;
+          } catch (err) {
+            console.error('❌ Error al renovar token:', err);
+            // Si falla la renovación, limpiar tokens y continuar con API Key
+            localStorage.removeItem('google_access_token_quotations');
+            localStorage.removeItem('google_refresh_token_quotations');
+            localStorage.removeItem('google_token_expiry_quotations');
+            setAccessToken(null);
+            setIsAuthenticated(false);
+          }
+        }
+        
+        // Si no hay refresh token o falló la renovación, usar API Key
+        if (GOOGLE_API_KEY) {
+          console.log('🔑 API Key encontrada, cargando desde Google Sheets...');
+          fetchGoogleSheetData();
+          fetchCrmClients();
+          fetchQuotations();
+        } else {
+          console.log('⚠️ Sin autenticación, cargando datos de ejemplo...');
+          setLoading(false);
+        }
+      }
+    };
+
+    // Manejar callback de OAuth2
+    handleOAuthCallback();
+    
+    // Cargar datos
+    loadData();
   }, []);
 
   // Cerrar dropdowns cuando se hace clic fuera
@@ -412,11 +736,12 @@ export const Quotations: React.FC = () => {
 
   // Filtrar productos basado en búsqueda y filtros
   const filteredProducts = products.filter(product => {
-    const matchesSearch = getColumnValue(product, 'titulo')?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         getColumnValue(product, 'codigointerno')?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = getColumnValue(product, 'nombre')?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         getColumnValue(product, 'sku')?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         getColumnValue(product, 'categoria')?.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesFilter = statusFilter === 'all' || 
-                         getColumnValue(product, 'codigointerno')?.toLowerCase().includes(statusFilter);
+                         getColumnValue(product, 'categoria')?.toLowerCase().includes(statusFilter);
     
     return matchesSearch && matchesFilter;
   });
@@ -445,11 +770,13 @@ export const Quotations: React.FC = () => {
       // Agregar nuevo producto
       const newItem = {
         productId: product.id,
-        code: getColumnValue(product, 'codigointerno'),
-        title: getColumnValue(product, 'titulo'),
-        price: parseFloat(getColumnValue(product, 'nuevosprecioscolorland').replace(/[^\d.-]/g, '')) || 0,
+        code: getColumnValue(product, 'sku'),
+        title: getColumnValue(product, 'nombre'),
+        categoria: getColumnValue(product, 'categoria'),
+        descripcion: getColumnValue(product, 'descripcion'),
+        price: parseFloat(getColumnValue(product, 'precio').replace(/[^\d.-]/g, '')) || 0,
         quantity: 1,
-        total: parseFloat(getColumnValue(product, 'nuevosprecioscolorland').replace(/[^\d.-]/g, '')) || 0
+        total: parseFloat(getColumnValue(product, 'precio').replace(/[^\d.-]/g, '')) || 0
       };
       
       const newSubtotal = currentQuotation.subtotal + newItem.total;
@@ -495,22 +822,181 @@ export const Quotations: React.FC = () => {
     });
   };
 
-  const saveQuotation = () => {
+  // Función para guardar cotización en Google Sheets
+  const saveQuotationToSheets = async (quotation: any) => {
+    if (!accessToken && !GOOGLE_API_KEY) {
+      throw new Error('No se puede guardar cotización - Sin autenticación');
+    }
+
+    try {
+      // Crear array de valores para la cotización
+      const values = [
+        quotation.id || Date.now().toString(),
+        quotation.clientName || '',
+        quotation.projectName || '',
+        quotation.total || 0,
+        quotation.status || 'pending',
+        quotation.createdAt || new Date().toISOString().split('T')[0],
+        quotation.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        quotation.items.length || 0,
+        JSON.stringify(quotation.items) // Guardar items como JSON
+      ];
+
+      // Usar OAuth2 si está disponible, sino API Key
+      let url: string;
+      let headers: HeadersInit = { 'Content-Type': 'application/json' };
+      
+      if (accessToken) {
+        try {
+          const validToken = await getValidToken();
+          url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}:append?valueInputOption=USER_ENTERED`;
+          headers['Authorization'] = `Bearer ${validToken}`;
+        } catch (err) {
+          console.error('Error al obtener token válido:', err);
+          throw new Error('No se pudo obtener un token válido para guardar la cotización');
+        }
+      } else {
+        url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}:append?valueInputOption=USER_ENTERED&key=${GOOGLE_API_KEY}`;
+      }
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ values: [values] })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Error en respuesta:', errorText);
+        throw new Error(`Error al guardar cotización: ${response.status} ${response.statusText}`);
+      }
+
+      console.log('✅ Cotización guardada exitosamente en Google Sheets');
+      
+    } catch (err) {
+      console.error('Error al guardar cotización en Google Sheets:', err);
+      throw err;
+    }
+  };
+
+  const saveChanges = async () => {
+    if (!currentQuotation.clientName || currentQuotation.items.length === 0) {
+      if (!currentQuotation.clientName) {
+        alert('❌ Por favor selecciona un cliente antes de guardar la cotización');
+      } else if (currentQuotation.items.length === 0) {
+        alert('❌ Por favor agrega al menos un producto antes de guardar la cotización');
+      }
+      return;
+    }
+
+    if (!isEditingExisting || !editingQuotationId) {
+      alert('❌ Error: No se puede actualizar una cotización que no existe');
+      return;
+    }
+
+    try {
+      const quotationData: CreateQuotationData = {
+        quotationName: currentQuotation.quotationName,
+        clientName: currentQuotation.clientName,
+        projectName: currentQuotation.projectName,
+        total: currentQuotation.total,
+        subtotal: currentQuotation.subtotal,
+        discount: currentQuotation.discount || 0,
+        discountType: currentQuotation.discountType || 'percentage',
+        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        items: currentQuotation.items
+      };
+
+      console.log('🔄 Actualizando cotización existente...', editingQuotationId);
+      
+      const updatedQuotation = await quotationAPI.updateQuotation(editingQuotationId, quotationData);
+      
+      // Actualizar la cotización en la lista local
+      setQuotations(quotations.map(q => 
+        q.id === editingQuotationId ? updatedQuotation : q
+      ));
+
+      console.log('✅ Cotización actualizada exitosamente');
+      alert('✅ Cotización actualizada exitosamente');
+      
+    } catch (err) {
+      console.error('❌ Error al actualizar cotización:', err);
+      alert('❌ Error al actualizar cotización: ' + (err instanceof Error ? err.message : 'Error desconocido'));
+    }
+  };
+
+  const openSaveModal = () => {
     if (currentQuotation.clientName && currentQuotation.items.length > 0) {
-      const newQuotation = {
-        ...currentQuotation,
-        id: Date.now().toString(),
-        status: 'pending',
-        createdAt: new Date().toISOString().split('T')[0],
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 30 días
+      // Si estamos editando una cotización existente, usar su nombre actual
+      if (isEditingExisting && currentQuotation.quotationName) {
+        setTempQuotationName(currentQuotation.quotationName);
+      } else {
+        // Generar nombre sugerido automáticamente para nueva cotización
+        const suggestedName = `Cotización ${currentQuotation.clientName} - ${new Date().toLocaleDateString('es-CO')}`;
+        setTempQuotationName(suggestedName);
+      }
+      setShowSaveModal(true);
+    } else {
+      console.log('❌ No se puede guardar: falta cliente o productos');
+      if (!currentQuotation.clientName) {
+        alert('❌ Por favor selecciona un cliente antes de guardar la cotización');
+      } else if (currentQuotation.items.length === 0) {
+        alert('❌ Por favor agrega al menos un producto antes de guardar la cotización');
+      }
+    }
+  };
+
+  const saveQuotation = async () => {
+    console.log('🔍 Intentando guardar cotización...');
+    console.log('📝 Nombre:', tempQuotationName);
+    console.log('📋 Cliente:', currentQuotation.clientName);
+    console.log('📦 Productos:', currentQuotation.items.length);
+    console.log('💰 Total:', currentQuotation.total);
+    console.log('🔄 Editando existente:', isEditingExisting);
+    console.log('🆔 ID de edición:', editingQuotationId);
+    
+    try {
+      const quotationData: CreateQuotationData = {
+        quotationName: tempQuotationName,
+        clientName: currentQuotation.clientName,
+        projectName: currentQuotation.projectName,
+        total: currentQuotation.total,
+        subtotal: currentQuotation.subtotal,
+        discount: currentQuotation.discount || 0,
+        discountType: currentQuotation.discountType || 'percentage',
+        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 días
+        items: currentQuotation.items
       };
       
-      setQuotations([newQuotation, ...quotations]);
+      console.log('📤 Enviando datos a la API:', quotationData);
+      
+      let savedQuotation: Quotation;
+      
+      if (isEditingExisting && editingQuotationId) {
+        // Actualizar cotización existente
+        console.log('🔄 Actualizando cotización existente...');
+        savedQuotation = await quotationAPI.updateQuotation(editingQuotationId, quotationData);
+        
+        // Actualizar la cotización en la lista local
+        setQuotations(quotations.map(q => 
+          q.id === editingQuotationId ? savedQuotation : q
+        ));
+      } else {
+        // Crear nueva cotización
+        console.log('➕ Creando nueva cotización...');
+        savedQuotation = await quotationAPI.createQuotation(quotationData);
+        
+        // Agregar la nueva cotización a la lista local
+        setQuotations([savedQuotation, ...quotations]);
+      }
+      
+      console.log('✅ Cotización guardada exitosamente:', savedQuotation);
       
       // Limpiar la cotización actual para empezar una nueva
       setCurrentQuotation({
         clientName: '',
         projectName: '',
+        quotationName: '',
         items: [],
         total: 0,
         subtotal: 0,
@@ -519,12 +1005,26 @@ export const Quotations: React.FC = () => {
         date: new Date().toISOString().split('T')[0]
       });
       
+      // Limpiar estados de edición
+      setIsEditingExisting(false);
+      setEditingQuotationId(null);
+      
       // Limpiar también la búsqueda de productos
       setProductSearchTerm('');
       setShowProductDropdown(false);
       setSearchResults([]);
       
-      alert('✅ Cotización guardada exitosamente');
+      // Cerrar modal
+      setShowSaveModal(false);
+      setTempQuotationName('');
+      
+      // Resetear estado de edición
+      setIsEditingExisting(false);
+      
+      alert(`✅ Cotización "${tempQuotationName}" guardada exitosamente en la base de datos`);
+    } catch (err) {
+      console.error('Error al guardar cotización:', err);
+      alert('❌ Error al guardar cotización: ' + (err instanceof Error ? err.message : 'Error desconocido'));
     }
   };
 
@@ -976,29 +1476,52 @@ export const Quotations: React.FC = () => {
                     {/* Header */}
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-text">Sistema de Cotizaciones</h1>
-                  <p className="text-text-secondary mt-1">
-                    Crear cotizaciones usando productos de ColorLand
-                  </p>
-                  {GOOGLE_API_KEY ? (
-                    <div className="flex items-center mt-2 text-sm text-green-600">
-                      <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-                      Conectado a Google Sheets
-                    </div>
-                  ) : (
-                    <div className="flex items-center mt-2 text-sm text-red-600">
-                      <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
-                      API Key no configurada
-                    </div>
-                  )}
+                  <h1 className="text-3xl font-bold text-text">Cotizaciones</h1>
                 </div>
                 <div className="flex gap-2">
+                  {(GOOGLE_API_KEY || accessToken) ? (
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline" 
+                        className="bg-green-50 text-green-700 hover:bg-green-100"
+                        onClick={() => window.open(`https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/edit?gid=0#gid=0`, '_blank')}
+                      >
+                        <FileText className="w-4 h-4 mr-2" />
+                        Abrir Google Sheet
+                      </Button>
+                      <Button onClick={() => fetchGoogleSheetData()} variant="outline">
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Actualizar
+                      </Button>
+                      {!accessToken && GOOGLE_CLIENT_ID && (
+                        <Button 
+                          onClick={authenticateWithGoogle} 
+                          variant="outline"
+                          className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                        >
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Conectar con Google
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <Button variant="outline" className="bg-red-50 text-red-700" disabled>
+                        <AlertCircle className="w-4 h-4 mr-2" />
+                        No Conectado
+                      </Button>
+                      <div className="text-xs text-gray-500 mt-1">
+                        <p>Configura la API Key</p>
+                      </div>
+                    </div>
+                  )}
                   <Button 
                     onClick={() => {
                       // Limpiar solo los productos de la cotización actual
                       setCurrentQuotation({
                         clientName: '',
                         projectName: '',
+                        quotationName: '',
                         items: [],
                         total: 0,
                         subtotal: 0,
@@ -1010,17 +1533,27 @@ export const Quotations: React.FC = () => {
                       setProductSearchTerm('');
                       setShowProductDropdown(false);
                       setSearchResults([]);
+                      // Limpiar búsqueda de clientes
+                      setClientSearchTerm('');
+                      setShowClientDropdown(false);
+                      setClientSearchResults([]);
+                      // Resetear estado de edición
+                      setIsEditingExisting(false);
+                      // Mostrar mensaje de confirmación
+                      alert('✅ Formulario de cotización limpiado. Puedes crear una nueva cotización.');
                     }}
-                    variant="outline"
+                    variant={currentQuotation.clientName || currentQuotation.items.length > 0 ? "danger" : "outline"}
+                    className={currentQuotation.clientName || currentQuotation.items.length > 0 ? "bg-red-50 text-red-700 hover:bg-red-100" : ""}
                   >
                     <Calculator className="w-5 h-5 mr-2" />
-                    Nueva Cotización
+                    {currentQuotation.clientName || currentQuotation.items.length > 0 ? 'Limpiar Cotización' : 'Nueva Cotización'}
                   </Button>
                 </div>
               </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Stats Cards - Oculto temporalmente */}
+      {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="text-center">
           <h3 className="text-2xl font-bold text-text">{products.length}</h3>
           <p className="text-gray-600">Total Productos</p>
@@ -1028,7 +1561,8 @@ export const Quotations: React.FC = () => {
         <Card className="text-center">
           <h3 className="text-2xl font-bold text-text">
             {products.filter(p => 
-              getColumnValue(p, 'codigointerno')?.toLowerCase().includes('bc')
+              getColumnValue(p, 'categoria')?.toLowerCase().includes('cubeta') || 
+              getColumnValue(p, 'sku')?.toLowerCase().includes('bc')
             ).length}
           </h3>
           <p className="text-gray-600">Cubetas 19LT</p>
@@ -1036,19 +1570,49 @@ export const Quotations: React.FC = () => {
         <Card className="text-center">
           <h3 className="text-2xl font-bold text-text">
             {products.filter(p => 
-              getColumnValue(p, 'codigointerno')?.toLowerCase().includes('bg')
+              getColumnValue(p, 'categoria')?.toLowerCase().includes('galon') || 
+              getColumnValue(p, 'sku')?.toLowerCase().includes('bg')
             ).length}
           </h3>
           <p className="text-gray-600">Galones 4LT</p>
         </Card>
-
-      </div>
+      </div> */}
 
       {/* Formulario de Cotización - Siempre visible */}
-        <Card>
+        <Card className={currentQuotation.clientName || currentQuotation.items.length > 0 ? "border-blue-200 bg-blue-50" : ""}>
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-text">Nueva Cotización</h3>
             
+            {/* Mostrar nombre de la cotización cuando se está editando */}
+            {isEditingExisting && currentQuotation.quotationName && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                  <span className="text-sm font-medium text-blue-800">Editando:</span>
+                  <span className="text-sm text-blue-700 font-semibold">{currentQuotation.quotationName}</span>
+                </div>
+              </div>
+            )}
+            
+            {/* Nombre de la cotización - Oculto */}
+            {/* <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Nombre de la Cotización
+              </label>
+              <input
+                type="text"
+                value={currentQuotation.quotationName}
+                onChange={(e) => setCurrentQuotation({
+                  ...currentQuotation,
+                  quotationName: e.target.value
+                })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                placeholder="Ej: Cotización Casa ABC - Enero 2025"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Asigna un nombre descriptivo para identificar fácilmente esta cotización
+              </p>
+            </div> */}
+
             {/* Información del cliente */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1312,7 +1876,7 @@ export const Quotations: React.FC = () => {
                       <option value="">Seleccionar producto...</option>
                       {filteredProducts.map((product) => (
                         <option key={product.id} value={product.id}>
-                          {getColumnValue(product, 'codigointerno')} - {getColumnValue(product, 'titulo')}
+                          {getColumnValue(product, 'sku')} - {getColumnValue(product, 'nombre')} ({getColumnValue(product, 'categoria')})
                         </option>
                       ))}
                     </select>
@@ -1367,15 +1931,18 @@ export const Quotations: React.FC = () => {
                             <div className="flex justify-between items-start">
                               <div className="flex-1">
                                 <p className="font-medium text-sm text-gray-900">
-                                  {getColumnValue(product, 'codigointerno')}
+                                  {getColumnValue(product, 'sku')}
                                 </p>
                                 <p className="text-sm text-gray-600 mt-1">
-                                  {getColumnValue(product, 'titulo')}
+                                  {getColumnValue(product, 'nombre')}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {getColumnValue(product, 'categoria')}
                                 </p>
                               </div>
                               <div className="text-right ml-2">
                                 <p className="text-sm font-semibold text-blue-600">
-                                  {formatInternationalCurrency(getColumnValue(product, 'nuevosprecioscolorland'))}
+                                  {formatInternationalCurrency(getColumnValue(product, 'precio'))}
                                 </p>
                                 <p className="text-xs text-gray-500">por unidad</p>
                               </div>
@@ -1406,14 +1973,44 @@ export const Quotations: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Cantidad
                     </label>
-                    <input
-                      type="number"
-                      id="quantity-input"
-                      min="1"
-                      defaultValue="1"
-                      className="w-full h-10 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                      placeholder="Cantidad"
-                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const quantityInput = document.getElementById('quantity-input') as HTMLInputElement;
+                          const currentValue = parseInt(quantityInput.value) || 1;
+                          const newValue = Math.max(1, currentValue - 1);
+                          quantityInput.value = newValue.toString();
+                        }}
+                        className="w-10 h-10 p-0 text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                      >
+                        -
+                      </Button>
+                      <input
+                        type="number"
+                        id="quantity-input"
+                        min="1"
+                        defaultValue="1"
+                        className="flex-1 h-10 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-center"
+                        placeholder="Cantidad"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const quantityInput = document.getElementById('quantity-input') as HTMLInputElement;
+                          const currentValue = parseInt(quantityInput.value) || 1;
+                          const newValue = currentValue + 1;
+                          quantityInput.value = newValue.toString();
+                        }}
+                        className="w-10 h-10 p-0 text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                      >
+                        +
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 
@@ -1447,13 +2044,31 @@ export const Quotations: React.FC = () => {
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
                           <label className="text-xs text-gray-600">Cantidad:</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) => updateItemQuantity(item.productId, parseInt(e.target.value) || 1)}
-                            className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm"
-                          />
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateItemQuantity(item.productId, Math.max(1, item.quantity - 1))}
+                              className="w-8 h-8 p-0 text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                            >
+                              -
+                            </Button>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => updateItemQuantity(item.productId, parseInt(e.target.value) || 1)}
+                              className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm"
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateItemQuantity(item.productId, item.quantity + 1)}
+                              className="w-8 h-8 p-0 text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                            >
+                              +
+                            </Button>
+                          </div>
                         </div>
                         <div className="text-right">
                           <p className="font-semibold text-sm">{formatInternationalCurrency(item.total)}</p>
@@ -1554,9 +2169,36 @@ export const Quotations: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Estado de la cotización */}
+                <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-3 h-3 rounded-full ${currentQuotation.clientName ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                        <span className="text-sm font-medium">
+                          Cliente: {currentQuotation.clientName || 'No seleccionado'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-3 h-3 rounded-full ${currentQuotation.items.length > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                        <span className="text-sm font-medium">
+                          Productos: {currentQuotation.items.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {currentQuotation.clientName && currentQuotation.items.length > 0 
+                        ? '✅ Listo para guardar' 
+                        : '❌ Faltan datos requeridos'
+                      }
+                    </div>
+                  </div>
+                </div>
+
                 {/* Botones de acción */}
                 <div className="mt-4 flex gap-2">
-                  <Button 
+                  {/* Botón Enviar por Email - Oculto */}
+                  {/* <Button 
                     onClick={() => {
                       if (currentQuotation.clientName && currentQuotation.items.length > 0) {
                         setSelectedQuotation(currentQuotation);
@@ -1567,23 +2209,119 @@ export const Quotations: React.FC = () => {
                   >
                     <Mail className="w-4 h-4 mr-2" />
                     Enviar por Email
-                  </Button>
-                  <Button 
+                  </Button> */}
+                  {isEditingExisting ? (
+                    <>
+                      <Button 
+                        variant="outline" 
+                        onClick={saveChanges}
+                        disabled={!currentQuotation.clientName || currentQuotation.items.length === 0}
+                        className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Guardar Cambios
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={openSaveModal}
+                        disabled={!currentQuotation.clientName || currentQuotation.items.length === 0}
+                        className="bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Guardar como Nueva
+                      </Button>
+                    </>
+                  ) : (
+                    <Button 
+                      variant="outline" 
+                      onClick={openSaveModal}
+                      disabled={!currentQuotation.clientName || currentQuotation.items.length === 0}
+                      className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      Guardar Cotización
+                    </Button>
+                  )}
+                  {/* Botón Crear Prueba - Oculto */}
+                  {/* <Button 
                     variant="outline" 
-                    onClick={saveQuotation}
-                    disabled={!currentQuotation.clientName || currentQuotation.items.length === 0}
+                    onClick={() => {
+                      // Crear una cotización de prueba
+                      setCurrentQuotation({
+                        clientName: 'Cliente de Prueba',
+                        projectName: 'Proyecto de Prueba',
+                        quotationName: 'Cotización de Prueba - ' + new Date().toLocaleDateString('es-CO'),
+                        items: [
+                          {
+                            productId: '1',
+                            code: 'TEST001',
+                            title: 'Producto de Prueba',
+                            price: 100000,
+                            quantity: 2,
+                            total: 200000
+                          }
+                        ],
+                        total: 200000,
+                        subtotal: 200000,
+                        discount: 0,
+                        discountType: 'percentage',
+                        date: new Date().toISOString().split('T')[0]
+                      });
+                      alert('✅ Cotización de prueba creada. Ahora puedes guardarla.');
+                    }}
+                    className="bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200"
                   >
-                    <Save className="w-4 h-4 mr-2" />
-                    Guardar Cotización
-                  </Button>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Crear Prueba
+                  </Button> */}
                 </div>
               </div>
             )}
           </div>
         </Card>
 
-      {/* Botón de Exportar PDF */}
-      <div className="flex justify-end">
+      {/* Botones de acción principales */}
+      <div className="flex justify-between items-center mb-4">
+        <Button 
+          variant="outline" 
+          onClick={() => {
+            // Cargar cotizaciones guardadas y abrir modal
+            fetchQuotations();
+            setShowQuotationsModal(true);
+          }}
+          className="bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200"
+        >
+          <FileText className="w-4 h-4 mr-2" />
+          Ver Cotizaciones Guardadas
+        </Button>
+        
+        <Button 
+          variant="outline" 
+          onClick={() => {
+            if (currentQuotation.items.length > 0) {
+              // Exportar la cotización actual
+              const quotationToExport = {
+                ...currentQuotation,
+                clientName: currentQuotation.clientName || 'Cliente por definir',
+                projectName: currentQuotation.projectName || 'Proyecto por definir',
+                createdAt: new Date().toISOString().split('T')[0],
+                validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+              };
+              generatePDF(quotationToExport);
+            } else {
+              alert('❌ No hay productos para exportar');
+            }
+          }}
+          disabled={currentQuotation.items.length === 0}
+          className="bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200"
+        >
+          <Download className="w-4 h-4 mr-2" />
+          Exportar PDF
+        </Button>
+      </div>
+
+      {/* Botón de Exportar PDF - Oculto ya que está arriba */}
+      <div className="hidden">
         <Button 
           variant="outline" 
           onClick={() => {
@@ -1619,78 +2357,6 @@ export const Quotations: React.FC = () => {
         </Button>
       </div>
 
-      {/* Cotizaciones Guardadas */}
-      {quotations.length > 0 && (
-        <Card>
-          <div className="overflow-x-auto">
-            <h3 className="text-lg font-semibold text-text mb-4">Cotizaciones Guardadas</h3>
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 font-medium text-text">Cliente</th>
-                  <th className="text-left py-3 px-4 font-medium text-text">Proyecto</th>
-                  <th className="text-left py-3 px-4 font-medium text-text">Productos</th>
-                  <th className="text-left py-3 px-4 font-medium text-text">Total</th>
-                  <th className="text-left py-3 px-4 font-medium text-text">Estado</th>
-                  <th className="text-left py-3 px-4 font-medium text-text">Fecha</th>
-                  <th className="text-left py-3 px-4 font-medium text-text">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {quotations.map((quotation) => (
-                  <tr key={quotation.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4">
-                      <p className="font-medium text-gray-700">{quotation.clientName}</p>
-                    </td>
-                    <td className="py-3 px-4">
-                      <p className="text-gray-700">{quotation.projectName}</p>
-                    </td>
-                    <td className="py-3 px-4">
-                      <p className="text-sm text-gray-600">{quotation.items.length} productos</p>
-                    </td>
-                    <td className="py-3 px-4">
-                      <p className="font-medium text-gray-700">{formatInternationalCurrency(quotation.total)}</p>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(quotation.status)}`}>
-                        {getStatusText(quotation.status)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-500">{quotation.createdAt}</td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center space-x-2">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => generatePDF(quotation)}
-                        >
-                          <FileText className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedQuotation(quotation);
-                            setShowEmailModal(true);
-                          }}
-                        >
-                          <Mail className="w-4 h-4" />
-                        </Button>
-                        <Button size="sm" variant="outline">
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700">
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
 
       {/* Modal para agregar nuevo cliente */}
       {showAddClientModal && (
@@ -1861,6 +2527,215 @@ export const Quotations: React.FC = () => {
               }}>
                 Cancelar
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para guardar cotización con nombre */}
+      {showSaveModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              {isEditingExisting ? 'Guardar como Nueva Cotización' : 'Guardar Cotización'}
+            </h3>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nombre de la Cotización
+              </label>
+              <input
+                type="text"
+                value={tempQuotationName}
+                onChange={(e) => setTempQuotationName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                placeholder="Ingresa un nombre para la cotización"
+                autoFocus
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                {isEditingExisting 
+                  ? 'Ingresa un nuevo nombre para crear una copia de esta cotización' 
+                  : 'Este nombre te ayudará a identificar la cotización más fácilmente'
+                }
+              </p>
+            </div>
+
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Resumen de la Cotización:</h4>
+              <p className="text-sm text-gray-600">
+                <strong>Cliente:</strong> {currentQuotation.clientName}
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Proyecto:</strong> {currentQuotation.projectName}
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Productos:</strong> {currentQuotation.items.length} items
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Total:</strong> ${currentQuotation.total.toLocaleString('es-CO')}
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowSaveModal(false);
+                  setTempQuotationName('');
+                }}
+                className="px-4 py-2"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={saveQuotation}
+                disabled={!tempQuotationName.trim()}
+                className={isEditingExisting ? "bg-orange-600 hover:bg-orange-700 text-white px-4 py-2" : "bg-green-600 hover:bg-green-700 text-white px-4 py-2"}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {isEditingExisting ? 'Guardar como Nueva' : 'Guardar'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para ver cotizaciones guardadas */}
+      {showQuotationsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] mx-4 overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Cotizaciones Guardadas ({quotations.length})
+              </h3>
+              <Button
+                variant="outline"
+                onClick={() => setShowQuotationsModal(false)}
+                className="px-4 py-2"
+              >
+                Cerrar
+              </Button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+              {quotations.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No hay cotizaciones guardadas</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="text-left py-3 px-4 font-medium text-gray-700">Nombre</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-700">Cliente</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-700">Proyecto</th>
+                        <th className="text-center py-3 px-4 font-medium text-gray-700">Items</th>
+                        <th className="text-right py-3 px-4 font-medium text-gray-700">Total</th>
+                        <th className="text-center py-3 px-4 font-medium text-gray-700">Estado</th>
+                        <th className="text-center py-3 px-4 font-medium text-gray-700">Fecha</th>
+                        <th className="text-center py-3 px-4 font-medium text-gray-700">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quotations.map((quotation) => (
+                        <tr 
+                          key={quotation.id} 
+                          className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                          onClick={() => openQuotationInForm(quotation)}
+                        >
+                          <td className="py-3 px-4">
+                            <p className="font-medium text-gray-900 truncate max-w-48" title={quotation.quotationName}>
+                              {quotation.quotationName}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-gray-700 truncate max-w-32" title={quotation.clientName}>
+                              {quotation.clientName}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-gray-700 truncate max-w-32" title={quotation.projectName}>
+                              {quotation.projectName}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              {quotation.items.length}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <p className="font-medium text-gray-900">{formatInternationalCurrency(quotation.total)}</p>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(quotation.status)}`}>
+                              {getStatusText(quotation.status)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center text-gray-500">
+                            {new Date(quotation.createdAt).toLocaleDateString('es-CO', { 
+                              day: '2-digit', 
+                              month: '2-digit',
+                              year: '2-digit'
+                            })}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center justify-center space-x-2">
+                              {/* Botones ocultos - Solo eliminar visible */}
+                              {/* <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={(e?: React.MouseEvent) => {
+                                  e?.stopPropagation();
+                                  openQuotationInForm(quotation);
+                                }}
+                                className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              >
+                                <FileText className="w-4 h-4" />
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={(e?: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  generatePDF(quotation);
+                                }}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={(e?: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  setSelectedQuotation(quotation);
+                                  setShowEmailModal(true);
+                                }}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Mail className="w-4 h-4" />
+                              </Button> */}
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={(e?: React.MouseEvent) => {
+                                  e?.stopPropagation();
+                                  deleteQuotation(quotation.id);
+                                }}
+                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </div>

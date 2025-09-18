@@ -28,8 +28,16 @@ export const DynamicSidebar: React.FC<DynamicSidebarProps> = ({
   const { user } = useAuthStore();
   const { menuItems, loading, error } = useDynamicMenu(role);
 
+  // Debug logs
+  console.log('DynamicSidebar - Role:', role);
+  console.log('DynamicSidebar - User:', user);
+  console.log('DynamicSidebar - MenuItems:', menuItems);
+  console.log('DynamicSidebar - Loading:', loading);
+  console.log('DynamicSidebar - Error:', error);
+
   // Convertir menús dinámicos a NavigationItems
   const navigationItems: NavigationItemType[] = React.useMemo(() => {
+    console.log('Converting menu items:', menuItems);
     return menuItems.map(convertDynamicToNavigation);
   }, [menuItems]);
 

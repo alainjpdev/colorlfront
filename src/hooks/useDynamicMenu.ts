@@ -16,13 +16,15 @@ export const useDynamicMenu = (role: 'admin' | 'teacher' | 'student') => {
   // Cargar elementos de menú
   const loadMenuItems = useCallback(async () => {
     try {
+      console.log('Loading menu items for role:', role);
       setLoading(true);
       setError(null);
       const items = await api.getMenuItems(role);
+      console.log('Menu items loaded:', items);
       setMenuItems(items.sort((a, b) => a.order - b.order));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar menú');
       console.error('Error loading menu items:', err);
+      setError(err instanceof Error ? err.message : 'Error al cargar menú');
     } finally {
       setLoading(false);
     }
@@ -111,10 +113,8 @@ export const useDynamicMenu = (role: 'admin' | 'teacher' | 'student') => {
 
   // Cargar elementos al montar el componente
   useEffect(() => {
-    if (user?.role === role) {
-      loadMenuItems();
-    }
-  }, [loadMenuItems, user?.role, role]);
+    loadMenuItems();
+  }, [loadMenuItems]);
 
   return {
     menuItems: menuItems.filter(item => item.isActive),

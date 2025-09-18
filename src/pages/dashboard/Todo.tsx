@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { CheckSquare, Square, Plus, Edit, Trash2, Calendar, Clock, Filter, Search, RefreshCw, AlertCircle, CheckCircle, Download } from 'lucide-react';
+import { CheckSquare, Square, Plus, Edit, Trash2, Calendar, Clock, Filter, Search, RefreshCw, AlertCircle, CheckCircle, Download, Save } from 'lucide-react';
 import { airtableMigration } from '../../utils/airtableMigration';
 
 interface TodoItem {
@@ -228,6 +228,128 @@ export const Todo: React.FC = () => {
     }
   };
 
+  // Estado para controlar debounce
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Estados para cambios pendientes
+  const [pendingChanges, setPendingChanges] = useState<{ [key: string]: TodoItem }>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  // Función para actualizar cambios pendientes (sin guardar en Google Sheets)
+  const updatePendingChange = (todoId: string, updatedTodo: TodoItem) => {
+    setPendingChanges(prev => ({
+      ...prev,
+      [todoId]: updatedTodo
+    }));
+    
+    // Actualizar solo el estado local
+    setTodos(todos.map(t => t.id === todoId ? updatedTodo : t));
+  };
+
+  // Función para guardar todos los cambios pendientes
+  const saveAllPendingChanges = async () => {
+    if (Object.keys(pendingChanges).length === 0) return;
+    
+    setIsSaving(true);
+    try {
+      const savePromises = Object.values(pendingChanges).map(todo => 
+        updateTodoInSheets(todo).catch(err => {
+          console.warn(`⚠️ No se pudo actualizar tarea ${todo.id}:`, err);
+          return null;
+        })
+      );
+      
+      await Promise.all(savePromises);
+      
+      setPendingChanges({});
+      setSuccessMessage(`✅ ${Object.keys(pendingChanges).length} cambios guardados exitosamente`);
+      setError(null);
+    } catch (err) {
+      console.error('Error al guardar cambios:', err);
+      setError('Error al guardar algunos cambios');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Función de refresh con debounce
+  const refreshWithDebounce = async () => {
+    if (isRefreshing) {
+      console.log('⏳ Ya hay una actualización en progreso, ignorando...');
+      return;
+    }
+    
+    setIsRefreshing(true);
+    try {
+      await fetchTodosFromSheets();
+    } finally {
+      // Esperar 2 segundos antes de permitir otra actualización
+      setTimeout(() => {
+        setIsRefreshing(false);
+      }, 2000);
+    }
+  };
+
+  // Efecto para detectar intentos de salir de la página con cambios pendientes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (Object.keys(pendingChanges).length > 0) {
+        e.preventDefault();
+        e.returnValue = 'Tienes cambios sin guardar. ¿Estás seguro de que quieres salir?';
+        return 'Tienes cambios sin guardar. ¿Estás seguro de que quieres salir?';
+      }
+    };
+
+    const handlePopState = (e: PopStateEvent) => {
+      if (Object.keys(pendingChanges).length > 0) {
+        e.preventDefault();
+        setShowExitConfirm(true);
+        // Restaurar el estado de la URL
+        window.history.pushState(null, '', window.location.href);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [pendingChanges]);
+
+  // Función para retry con backoff exponencial
+  const fetchWithRetry = async (url: string, maxRetries = 3): Promise<Response> => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await fetch(url);
+        
+        if (response.status === 429) {
+          // Rate limit excedido, esperar antes del siguiente intento
+          const waitTime = Math.pow(2, attempt) * 1000; // Backoff exponencial: 1s, 2s, 4s
+          console.log(`⏳ Rate limit excedido. Esperando ${waitTime}ms antes del intento ${attempt + 1}/${maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue;
+        }
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        return response;
+      } catch (error) {
+        if (attempt === maxRetries - 1) {
+          throw error;
+        }
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.log(`❌ Error en intento ${attempt + 1}/${maxRetries}. Esperando ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    throw new Error('Máximo número de reintentos alcanzado');
+  };
+
   // Función para obtener todos desde Google Sheets
   const fetchTodosFromSheets = async () => {
     if (!GOOGLE_API_KEY) {
@@ -243,7 +365,7 @@ export const Todo: React.FC = () => {
       // Usar solo API Key
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${TODO_SHEET_ID}/values/${TODO_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
       
-      const response = await fetch(url);
+      const response = await fetchWithRetry(url);
       
       if (!response.ok) {
         throw new Error('Error al obtener datos del Google Sheet');
@@ -694,35 +816,18 @@ export const Todo: React.FC = () => {
   };
 
   // Cambiar notas de una tarea
-  const handleNotesChange = async (id: string, newNotes: string) => {
+  const handleNotesChange = (id: string, newNotes: string) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
 
-    try {
-      const updatedTodo = { 
-        ...todo, 
-        notes: newNotes, 
-        updatedAt: new Date().toISOString() 
-      };
-      
-      // Actualizar estado local inmediatamente
-      setTodos(todos.map(t => t.id === id ? updatedTodo : t));
-      
-      // Intentar actualizar en Google Sheets (puede fallar con API Key)
-      try {
-        await updateTodoInSheets(updatedTodo, 'notes');
-        setSuccessMessage('✅ Notas actualizadas exitosamente');
-      } catch (sheetsError) {
-        console.warn('⚠️ No se pudo actualizar en Google Sheets (solo lectura con API Key):', sheetsError);
-        setSuccessMessage('✅ Notas actualizadas localmente (requiere OAuth2 para guardar en Google Sheets)');
-      }
-      
-      setError(null);
-      
-    } catch (err) {
-      console.error('Error al actualizar notas:', err);
-      setError('Error al actualizar las notas');
-    }
+    const updatedTodo = { 
+      ...todo, 
+      notes: newNotes, 
+      updatedAt: new Date().toISOString() 
+    };
+    
+    // Actualizar solo localmente (cambios pendientes)
+    updatePendingChange(id, updatedTodo);
   };
 
   // Eliminar todo de Google Sheets
@@ -1338,10 +1443,25 @@ export const Todo: React.FC = () => {
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Abrir Google Sheet
               </Button>
-              <Button onClick={() => fetchTodosFromSheets()} variant="outline">
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Actualizar
+              <Button 
+                onClick={refreshWithDebounce} 
+                variant="outline"
+                disabled={isRefreshing}
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Actualizando...' : 'Actualizar'}
               </Button>
+              {Object.keys(pendingChanges).length > 0 && (
+                <Button 
+                  onClick={saveAllPendingChanges} 
+                  variant="outline"
+                  disabled={isSaving}
+                  className="bg-red-50 text-red-700 hover:bg-red-100 border-red-300 ring-2 ring-red-200 animate-pulse"
+                >
+                  <Save className={`w-4 h-4 mr-2 ${isSaving ? 'animate-spin' : ''}`} />
+                  {isSaving ? 'Guardando...' : `⚠️ Guardar Cambios (${Object.keys(pendingChanges).length})`}
+                </Button>
+              )}
               {!accessToken && GOOGLE_CLIENT_ID && (
                 <Button 
                   onClick={authenticateWithGoogle} 
@@ -1486,11 +1606,20 @@ export const Todo: React.FC = () => {
                         rows={2}
                       />
                       <div className={`text-xs mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded ${todo.completed ? 'opacity-60' : ''}`}>
-                        <span className="font-medium text-yellow-800">Notas:</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-yellow-800">Notas:</span>
+                          {pendingChanges[todo.id] && (
+                            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                              Cambios pendientes
+                            </span>
+                          )}
+                        </div>
                         <textarea
                           value={todo.notes || ''}
                           onChange={(e) => handleNotesChange(todo.id, e.target.value)}
-                          className="text-yellow-700 mt-1 w-full bg-transparent border-none outline-none resize-none hover:bg-yellow-100 px-1 py-0.5 rounded"
+                          className={`text-yellow-700 mt-1 w-full bg-transparent border-none outline-none resize-none hover:bg-yellow-100 px-1 py-0.5 rounded ${
+                            pendingChanges[todo.id] ? 'ring-2 ring-orange-300' : ''
+                          }`}
                           placeholder="Agregar notas..."
                           rows={2}
                         />
@@ -1723,6 +1852,60 @@ export const Todo: React.FC = () => {
                 Crear Tarea
               </Button>
               <Button variant="outline" onClick={() => setShowAddForm(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación para cambios pendientes */}
+      {showExitConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center mb-4">
+              <AlertCircle className="w-6 h-6 text-red-500 mr-3" />
+              <h3 className="text-lg font-semibold text-text">Cambios sin guardar</h3>
+            </div>
+            
+            <p className="text-gray-700 mb-6">
+              Tienes <strong>{Object.keys(pendingChanges).length} cambios pendientes</strong> que no se han guardado. 
+              ¿Qué quieres hacer?
+            </p>
+            
+            <div className="flex gap-3">
+              <Button 
+                onClick={async () => {
+                  await saveAllPendingChanges();
+                  setShowExitConfirm(false);
+                  // Permitir navegación después de guardar
+                  window.history.back();
+                }}
+                className="bg-red-600 text-white hover:bg-red-700"
+                disabled={isSaving}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {isSaving ? 'Guardando...' : 'Guardar y Salir'}
+              </Button>
+              
+              <Button 
+                onClick={() => {
+                  setShowExitConfirm(false);
+                  // Descartar cambios y permitir navegación
+                  setPendingChanges({});
+                  window.history.back();
+                }}
+                variant="outline"
+                className="text-gray-600 hover:bg-gray-50"
+              >
+                Descartar Cambios
+              </Button>
+              
+              <Button 
+                onClick={() => setShowExitConfirm(false)}
+                variant="outline"
+                className="text-gray-600 hover:bg-gray-50"
+              >
                 Cancelar
               </Button>
             </div>

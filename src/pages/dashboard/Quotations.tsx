@@ -964,7 +964,7 @@ export const Quotations: React.FC = () => {
         subtotal: currentQuotation.subtotal,
         discount: currentQuotation.discount || 0,
         discountType: currentQuotation.discountType || 'percentage',
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 días
+        validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(), // 15 días
         items: currentQuotation.items
       };
       
@@ -1241,7 +1241,6 @@ export const Quotations: React.FC = () => {
                 <img src="${logoBase64}" alt="Logo" class="logo">
                 <div class="company-info">
                   <div class="report-title">COTIZACIÓN COLORLAND</div>
-                  <div class="generated-date">Generado el: ${new Date().toLocaleDateString('es-CO')}</div>
                 </div>
               </div>
             </div>
@@ -1255,14 +1254,6 @@ export const Quotations: React.FC = () => {
               <div class="info-item">
                 <span class="info-label">Proyecto:</span>
                 <span class="info-value">${quotation.projectName}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Fecha de emisión:</span>
-                <span class="info-value">${quotation.createdAt}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Válida hasta:</span>
-                <span class="info-value">${quotation.validUntil}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Total de productos:</span>
@@ -1299,13 +1290,13 @@ export const Quotations: React.FC = () => {
             <div class="total-section">
               <div class="total-label">TOTAL DE LA COTIZACIÓN</div>
               <div class="total-amount">$${formatInternationalNumber(quotation.total)}</div>
-              <div class="total-note">IVA incluido • Válida por 30 días</div>
+              <div class="total-note">IVA incluido • Válida por 15 días</div>
             </div>
             
             <div class="footer">
               <div style="border-top: 2px solid #ecf0f1; padding-top: 20px; margin-top: 30px;">
                 <p style="margin-bottom: 10px;">ColorLand - Pinturas de Alta Calidad</p>
-                <p style="margin-bottom: 5px;">Esta cotización es válida por 30 días desde la fecha de emisión</p>
+                <p style="margin-bottom: 5px;">Esta cotización es válida por 15 días</p>
                 <p style="font-size: 11px; color: #95a5a6;">© ${new Date().getFullYear()} - Todos los derechos reservados</p>
               </div>
             </div>
@@ -1353,7 +1344,7 @@ export const Quotations: React.FC = () => {
           id: Date.now().toString(),
           status: 'pending',
           createdAt: new Date().toISOString().split('T')[0],
-          validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 30 días
+          validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 15 días
         };
         setQuotations([newQuotation, ...quotations]);
       }

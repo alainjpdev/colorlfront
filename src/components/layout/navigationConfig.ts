@@ -267,17 +267,23 @@ export const iconMap: Record<string, React.ComponentType<{ className?: string }>
 export const convertDynamicToNavigation = (dynamicItem: DynamicMenuItem): NavigationItem => {
   const IconComponent = iconMap[dynamicItem.icon] || Home;
   
-  return {
+  const result: NavigationItem = {
     to: dynamicItem.to,
     key: dynamicItem.key,
     icon: IconComponent,
-    label: dynamicItem.label,
-    submenu: dynamicItem.submenu?.map(sub => ({
+    label: dynamicItem.label
+  };
+  
+  // Solo agregar submenu si existe y tiene elementos
+  if (dynamicItem.submenu && dynamicItem.submenu.length > 0) {
+    result.submenu = dynamicItem.submenu.map(sub => ({
       to: sub.to,
       icon: iconMap[sub.icon] || Home,
       label: sub.label
-    }))
-  };
+    }));
+  }
+  
+  return result;
 };
 
 export const adminNavigationItems: NavigationItem[] = [

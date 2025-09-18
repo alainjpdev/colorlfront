@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "setup-google": "node scripts/setup-google-service-account.js"
   },
   "prisma": {
     "seed": "ts-node --loader ts-node/esm ./prisma/seed.ts"
@@ -22,6 +23,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
+    "googleapis": "^160.0.0",
     "i18next": "^25.3.2",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.344.0",

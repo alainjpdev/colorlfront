@@ -16,14 +16,11 @@ export const useDynamicMenu = (role: 'admin' | 'teacher' | 'student') => {
   // Cargar elementos de menú
   const loadMenuItems = useCallback(async () => {
     try {
-      console.log('Loading menu items for role:', role);
       setLoading(true);
       setError(null);
       const items = await api.getMenuItems(role);
-      console.log('Menu items loaded:', items);
       setMenuItems(items.sort((a, b) => a.order - b.order));
     } catch (err) {
-      console.error('Error loading menu items:', err);
       setError(err instanceof Error ? err.message : 'Error al cargar menú');
     } finally {
       setLoading(false);

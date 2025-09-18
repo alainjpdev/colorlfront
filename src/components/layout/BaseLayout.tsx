@@ -10,12 +10,14 @@ interface BaseLayoutProps {
   navigationItems?: NavigationItem[];
   useDynamicMenu?: boolean;
   role?: 'admin' | 'teacher' | 'student';
+  children?: React.ReactNode;
 }
 
 export const BaseLayout: React.FC<BaseLayoutProps> = ({ 
   navigationItems, 
   useDynamicMenu = false, 
-  role = 'admin' 
+  role = 'admin',
+  children
 }) => {
   const { logout, user } = useAuthStore();
   const navigate = useNavigate();

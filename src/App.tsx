@@ -33,7 +33,10 @@ import CreateOrder from './pages/dashboard/CreateOrder';
 import { CRM } from './pages/dashboard/CRM';
 import { WhatsApp } from './pages/dashboard/WhatsApp';
 import { Todo } from './pages/dashboard/Todo';
+// import { TodoServiceAccount } from './pages/dashboard/TodoServiceAccount';
+// import { TodoReadOnly } from './pages/dashboard/TodoReadOnly';
 import { MenuManagement } from './pages/dashboard/MenuManagement';
+import { TestNavigation } from './pages/dashboard/TestNavigation';
 
 // Layout wrapper component
 const DashboardLayoutWrapper: React.FC = () => {
@@ -85,7 +88,7 @@ const App: React.FC = () => {
 
           {/* Rutas protegidas */}
           <Route
-            path="/dashboard/*"
+            path="/dashboard"
             element={
               <ProtectedRoute>
                 <DashboardLayoutWrapper />
@@ -216,6 +219,14 @@ const App: React.FC = () => {
                 </ProtectedRoute>
               } 
             />
+            {/* <Route 
+              path="todo-service" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <TodoServiceAccount />
+                </ProtectedRoute>
+              } 
+            /> */}
             <Route 
               path="reports" 
               element={
@@ -245,6 +256,14 @@ const App: React.FC = () => {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <MenuManagement />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="test-navigation" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <TestNavigation />
                 </ProtectedRoute>
               } 
             />

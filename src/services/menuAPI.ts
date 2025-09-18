@@ -16,6 +16,7 @@ class MenuAPI {
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
 
@@ -57,6 +58,11 @@ class MenuAPI {
 
   // Reordenar elementos de menú
   async reorderMenuItems(reorderData: Array<{ id: string; order: number }>): Promise<void> {
+    console.log('🔄 ReorderMenuItems - reorderData:', reorderData);
+    console.log('🔄 ReorderMenuItems - reorderData details:', reorderData.map(item => ({ id: item.id, order: item.order })));
+    console.log('🔄 ReorderMenuItems - reorderData IDs:', reorderData.map(item => item.id));
+    console.log('🔄 ReorderMenuItems - full reorderData JSON:', JSON.stringify(reorderData, null, 2));
+    console.log('🔄 ReorderMenuItems - token:', localStorage.getItem('token'));
     return this.request<void>('/api/menu/reorder', {
       method: 'PUT',
       body: JSON.stringify({ reorderData }),

@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { useDarkMode } from './hooks/useDarkMode';
+import { handleGoogleAuthCallback } from './services/googleAuthService';
 
 // Layouts
 import { StudentLayout } from './layouts/StudentLayout';
@@ -68,6 +69,58 @@ const DashboardRouter: React.FC = () => {
   return <DashboardComponent />;
 };
 
+// Componente para manejar el callback de Google OAuth
+const GoogleAuthCallbackHandler: React.FC = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Verificar si estamos en el callback de OAuth
+    const urlParams = new URLSearchParams(location.search);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+    const error = urlParams.get('error');
+
+    console.log('🔍 Verificando callback de OAuth:', { code: !!code, state, error });
+
+    if (error) {
+      console.error('❌ Error en OAuth:', error);
+      // Limpiar parámetros de la URL inmediatamente
+      setTimeout(() => {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }, 100);
+      return;
+    }
+
+    if (code && (state === 'google_auth' || state === 'quotations_reconnect')) {
+      console.log('🔄 Procesando callback de OAuth...');
+      
+      handleGoogleAuthCallback(code).then((success) => {
+        if (success) {
+          console.log('✅ Autenticación con Google exitosa');
+          // Recargar la página para actualizar el estado
+          setTimeout(() => {
+            window.location.reload();
+          }, 500);
+        } else {
+          console.error('❌ Error en la autenticación con Google');
+        }
+        // Limpiar parámetros de la URL
+        setTimeout(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }, 100);
+      }).catch((err) => {
+        console.error('❌ Error al procesar callback:', err);
+        // Limpiar parámetros de la URL en caso de error
+        setTimeout(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }, 100);
+      });
+    }
+  }, [location]);
+
+  return null;
+};
+
 const App: React.FC = () => {
   const { checkAuth } = useAuthStore();
   const [dark, setDark] = useDarkMode();
@@ -80,6 +133,7 @@ const App: React.FC = () => {
     <Router>
       <div className="App">
         {/* El toggle flotante de dark mode ha sido eliminado */}
+        <GoogleAuthCallbackHandler />
         <Routes>
           {/* Rutas públicas */}
           <Route path="/" element={<Landing />} />
@@ -268,6 +322,7 @@ const App: React.FC = () => {
               } 
             />
           </Route>
+
 
           {/* Página de no autorizado */}
           <Route 

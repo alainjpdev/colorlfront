@@ -90,9 +90,9 @@ export const DynamicSidebar: React.FC<DynamicSidebarProps> = ({
 
             {/* Navigation */}
             <nav className="flex-1 px-2 py-4 space-y-2">
-              {navigationItems.map((item) => (
+              {navigationItems.map((item, index) => (
                 <NavigationItem
-                  key={item.to || item.key}
+                  key={item.key || item.to || item.id || `menu-item-${index}`}
                   item={item}
                   collapsed={collapsed}
                   expandedMenus={expandedMenus}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Edit, Trash2, GripVertical, Eye, EyeOff, Save, X } from 'lucide-react';
+import { Plus, Edit, Trash2, GripVertical, Eye, EyeOff, Save, X, RotateCcw, Archive } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
@@ -80,6 +80,11 @@ const SortableItem: React.FC<SortableItemProps> = ({
           {item.to && (
             <span className="text-xs text-accent truncate">{item.to}</span>
           )}
+          {item.googleSheetUrl && (
+            <span className="text-xs text-blue-600 truncate" title="Google Sheets">
+              📊 Sheets
+            </span>
+          )}
         </div>
         <div className={`px-2 py-1 rounded text-xs flex-shrink-0 ${
           item.isActive 
@@ -109,14 +114,15 @@ const SortableItem: React.FC<SortableItemProps> = ({
           <Edit className="w-3 h-3" />
         </Button>
         
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onDelete(item.id)}
-          className="p-1 text-red-600 hover:text-red-700"
-        >
-          <Trash2 className="w-3 h-3" />
-        </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onDelete(item.id)}
+              className="p-1 text-red-600 hover:text-red-700"
+              title="Ocultar elemento (se puede restaurar)"
+            >
+              <Trash2 className="w-3 h-3" />
+            </Button>
       </div>
     </div>
   );
@@ -128,10 +134,10 @@ interface MenuManagerProps {
   role: 'admin' | 'teacher' | 'student';
 }
 
-export const MenuManager: React.FC<MenuManagerProps> = ({ 
-  menuItems, 
-  onMenuChange, 
-  role 
+export const MenuManager: React.FC<MenuManagerProps> = ({
+  menuItems,
+  onMenuChange,
+  role
 }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingItem, setEditingItem] = useState<DynamicMenuItem | null>(null);
@@ -139,6 +145,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<DynamicMenuItem[]>(menuItems);
+  const [showHidden, setShowHidden] = useState(false);
+  const [hiddenItems, setHiddenItems] = useState<DynamicMenuItem[]>([]);
 
   // Sensores para drag and drop
   const sensors = useSensors(
@@ -189,7 +197,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     icon: 'Home',
     label: '',
     role,
-    order: menuItems.length + 1
+    order: menuItems.length + 1,
+    googleSheetUrl: ''
   });
 
   // Cargar iconos disponibles
@@ -204,6 +213,24 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     };
     loadIcons();
   }, []);
+
+  // Cargar elementos ocultos
+  const loadHiddenItems = async () => {
+    try {
+      const hidden = await api.getAllMenuItemsWithHidden();
+      const hiddenFiltered = hidden.filter(item => !item.isActive);
+      setHiddenItems(hiddenFiltered);
+    } catch (err) {
+      console.error('Error loading hidden items:', err);
+    }
+  };
+
+  // Cargar elementos ocultos cuando se muestran
+  React.useEffect(() => {
+    if (showHidden) {
+      loadHiddenItems();
+    }
+  }, [showHidden]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,10 +253,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         icon: 'Home',
         label: '',
         role,
-        order: menuItems.length + 1
+        order: menuItems.length + 1,
+        googleSheetUrl: ''
       });
       setShowAddForm(false);
       onMenuChange();
+      
+      // Hard refresh después de crear un nuevo menú para asegurar que se vea inmediatamente
+      if (!editingItem) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000); // Esperar 1 segundo para que se vea el mensaje de éxito
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al guardar elemento');
     } finally {
@@ -245,19 +280,32 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       icon: item.icon,
       label: item.label,
       role: item.role,
-      order: item.order
+      order: item.order,
+      googleSheetUrl: item.googleSheetUrl || ''
     });
     setShowAddForm(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar este elemento?')) {
+    if (window.confirm('¿Estás seguro de que quieres ocultar este elemento? Podrás restaurarlo más tarde.')) {
       try {
         await api.deleteMenuItem(id);
         onMenuChange();
+        setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Error al eliminar elemento');
+        setError(err instanceof Error ? err.message : 'Error al ocultar elemento');
       }
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await api.restoreMenuItem(id);
+      onMenuChange();
+      loadHiddenItems(); // Recargar elementos ocultos
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al restaurar elemento');
     }
   };
 
@@ -280,7 +328,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       icon: 'Home',
       label: '',
       role,
-      order: menuItems.length + 1
+      order: menuItems.length + 1,
+      googleSheetUrl: ''
     });
     setEditingItem(null);
     setShowAddForm(false);
@@ -289,17 +338,28 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <h3 className="text-sm font-medium text-text">Elementos del Menú</h3>
-        <Button
-          onClick={() => setShowAddForm(true)}
-          size="sm"
-          className="flex items-center gap-1 text-xs"
-        >
-          <Plus className="w-3 h-3" />
-          Agregar
-        </Button>
-      </div>
+        <div className="flex justify-between items-center">
+          <h3 className="text-sm font-medium text-text">Elementos del Menú</h3>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setShowHidden(!showHidden)}
+              variant="ghost"
+              size="sm"
+              className="flex items-center gap-1 text-xs"
+            >
+              <Archive className="w-3 h-3" />
+              {showHidden ? 'Ocultar' : 'Mostrar'} Ocultos ({hiddenItems.length})
+            </Button>
+            <Button
+              onClick={() => setShowAddForm(true)}
+              size="sm"
+              className="flex items-center gap-1 text-xs"
+            >
+              <Plus className="w-3 h-3" />
+              Agregar
+            </Button>
+          </div>
+        </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -379,6 +439,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
             </div>
 
+            <div>
+              <label className="block text-xs font-medium text-text mb-1">
+                Google Sheets URL (opcional)
+              </label>
+              <Input
+                value={formData.googleSheetUrl || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, googleSheetUrl: e.target.value }))}
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                className="text-sm"
+                type="url"
+              />
+              <p className="text-xs text-text-secondary mt-1">
+                Si se proporciona, el elemento del menú se abrirá en una nueva pestaña con esta URL
+              </p>
+            </div>
+
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
@@ -432,6 +508,60 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           </div>
         </SortableContext>
       </DndContext>
+
+      {/* Sección de elementos ocultos */}
+      {showHidden && (
+        <div className="mt-6">
+          <h4 className="text-sm font-medium text-text mb-3 flex items-center gap-2">
+            <Archive className="w-4 h-4" />
+            Elementos Ocultos ({hiddenItems.length})
+          </h4>
+          <div className="space-y-1">
+            {hiddenItems.length === 0 ? (
+              <div className="text-center py-4 text-text-secondary text-sm">
+                No hay elementos ocultos
+              </div>
+            ) : (
+              hiddenItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between p-3 bg-gray-100 rounded-lg border border-gray-200"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="text-sm font-medium text-gray-600 truncate">{item.label}</span>
+                      <span className="text-xs text-gray-500 flex-shrink-0">({item.icon})</span>
+                      {item.to && (
+                        <span className="text-xs text-gray-500 truncate">{item.to}</span>
+                      )}
+                      {item.googleSheetUrl && (
+                        <span className="text-xs text-blue-600 truncate" title="Google Sheets">
+                          📊 Sheets
+                        </span>
+                      )}
+                    </div>
+                    <div className="px-2 py-1 rounded text-xs flex-shrink-0 bg-red-100 text-red-700">
+                      Oculto
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 ml-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRestore(item.id)}
+                      className="p-1 text-green-600 hover:text-green-700"
+                      title="Restaurar elemento"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

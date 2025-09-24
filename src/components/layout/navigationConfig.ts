@@ -103,7 +103,6 @@ import {
   Speaker,
   Mic,
   MicOff,
-  Volume1,
   // Iconos adicionales verificados
   DollarSign,
   Package,
@@ -119,7 +118,7 @@ import {
   Send,
   X,
   Minus,
-  GripVertical
+  GripVertical,
 } from 'lucide-react';
 import { DynamicMenuItem } from '../../types/menu';
 
@@ -134,12 +133,15 @@ export interface NavigationItem {
   key?: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  googleSheetUrl?: string; // URL de Google Sheets para enlazar
   submenu?: NavigationSubItem[];
+  id?: string; // ID único del elemento dinámico para usar como fallback de key
+  external?: boolean; // Si es un enlace externo (abre en nueva ventana)
 }
 
-// Mapeo de iconos de string a componentes de Lucide - SOLO ICONOS VERIFICADOS
+// Mapeo de iconos de string a componentes de Lucide - SIN DUPLICACIONES - v2
 export const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  // Iconos básicos de navegación (100% verificados)
+  // Iconos básicos de navegación
   Home,
   Users,
   FileText: FileTextIcon,
@@ -244,8 +246,7 @@ export const iconMap: Record<string, React.ComponentType<{ className?: string }>
   Speaker,
   Mic,
   MicOff,
-  Volume1,
-  // Iconos adicionales verificados
+  // Iconos adicionales
   DollarSign,
   Package,
   ArrowLeft,
@@ -260,7 +261,7 @@ export const iconMap: Record<string, React.ComponentType<{ className?: string }>
   Send,
   X,
   Minus,
-  GripVertical
+  GripVertical,
 };
 
 // Función para convertir DynamicMenuItem a NavigationItem
@@ -271,7 +272,9 @@ export const convertDynamicToNavigation = (dynamicItem: DynamicMenuItem): Naviga
     to: dynamicItem.to,
     key: dynamicItem.key,
     icon: IconComponent,
-    label: dynamicItem.label
+    label: dynamicItem.label,
+    googleSheetUrl: dynamicItem.googleSheetUrl,
+    id: dynamicItem.id // Incluir el ID único del elemento dinámico
   };
   
   // Solo agregar submenu si existe y tiene elementos

@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { CheckSquare, Square, Plus, Edit, Trash2, Calendar, Clock, Filter, Search, RefreshCw, AlertCircle, CheckCircle, Download, Save } from 'lucide-react';
 import { airtableMigration } from '../../utils/airtableMigration';
+import { useGoogleAuth } from '../../services/googleAuthService';
 
 interface TodoItem {
   id: string;
@@ -37,8 +38,15 @@ export const Todo: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  // Usar el servicio centralizado de autenticación con Google
+  const { 
+    isAuthenticated, 
+    accessToken, 
+    authenticate, 
+    getValidToken, 
+    isLoading: authLoading, 
+    error: authError 
+  } = useGoogleAuth();
   
   // Lista de encargados disponibles (se actualiza dinámicamente)
   const [availableAssignees, setAvailableAssignees] = useState<string[]>([]);
@@ -573,7 +581,7 @@ export const Todo: React.FC = () => {
       
       if (accessToken) {
         try {
-          const validToken = await getValidToken();
+          const validToken = await getValidAccessToken();
           url = `https://sheets.googleapis.com/v4/spreadsheets/${TODO_SHEET_ID}/values/${TODO_SHEET_NAME}:append?valueInputOption=USER_ENTERED`;
           headers['Authorization'] = `Bearer ${validToken}`;
         } catch (err) {
@@ -846,23 +854,9 @@ export const Todo: React.FC = () => {
     }
   };
 
-  // Función para obtener token válido (renovando si es necesario)
-  const getValidToken = async () => {
-    if (accessToken && isTokenValid()) {
-      return accessToken;
-    }
-    
-    if (accessToken && !isTokenValid()) {
-      try {
-        console.log('🔄 Token expirado, renovando...');
-        return await refreshAccessToken();
-      } catch (err) {
-        console.error('Error al renovar token:', err);
-        throw new Error('No se pudo renovar el token de acceso');
-      }
-    }
-    
-    throw new Error('No hay token de acceso disponible');
+  // Función para obtener token válido usando el servicio centralizado
+  const getValidAccessToken = async () => {
+    return await getValidToken();
   };
 
   // Función para obtener la estructura del sheet y mapear columnas correctamente
@@ -1010,7 +1004,7 @@ export const Todo: React.FC = () => {
       
       if (accessToken) {
         try {
-          const validToken = await getValidToken();
+          const validToken = await getValidAccessToken();
           url = `https://sheets.googleapis.com/v4/spreadsheets/${TODO_SHEET_ID}/values/${range}?valueInputOption=USER_ENTERED`;
           headers['Authorization'] = `Bearer ${validToken}`;
         } catch (err) {
@@ -1091,7 +1085,7 @@ export const Todo: React.FC = () => {
     let headers: HeadersInit = { 'Content-Type': 'application/json' };
     
     if (accessToken) {
-      const validToken = await getValidToken();
+      const validToken = await getValidAccessToken();
       url = `https://sheets.googleapis.com/v4/spreadsheets/${TODO_SHEET_ID}/values/${range}?valueInputOption=USER_ENTERED`;
       headers['Authorization'] = `Bearer ${validToken}`;
     } else {
@@ -1132,7 +1126,7 @@ export const Todo: React.FC = () => {
       
       if (accessToken) {
         try {
-          const validToken = await getValidToken();
+          const validToken = await getValidAccessToken();
           url = `https://sheets.googleapis.com/v4/spreadsheets/${TODO_SHEET_ID}/values/${range}?valueInputOption=USER_ENTERED`;
           headers['Authorization'] = `Bearer ${validToken}`;
         } catch (err) {
@@ -1423,147 +1417,143 @@ export const Todo: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-4">
+      {/* Header Compacto */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-text">To Do - Lista de Tareas</h1>
-          <p className="text-text-secondary mt-1">
-            Gestiona tus tareas y mantén el control de tus actividades
+          <h1 className="text-2xl font-bold text-text">To Do</h1>
+          <p className="text-sm text-text-secondary">
+            Gestiona tus tareas y actividades
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {(GOOGLE_API_KEY || accessToken) ? (
-            <div className="flex items-center gap-2">
+            <>
               <Button 
                 variant="outline" 
+                size="sm"
                 className="bg-green-50 text-green-700 hover:bg-green-100"
                 onClick={() => window.open('https://docs.google.com/spreadsheets/d/1D4XNNt_GJ0WFXB64FFphwYP4jPlhtw_D1cbqKa1obus/edit?gid=0#gid=0', '_blank')}
               >
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Abrir Google Sheet
+                <CheckCircle className="w-4 h-4 mr-1" />
+                Google Sheet
               </Button>
               <Button 
                 onClick={refreshWithDebounce} 
                 variant="outline"
+                size="sm"
                 disabled={isRefreshing}
               >
-                <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
                 {isRefreshing ? 'Actualizando...' : 'Actualizar'}
               </Button>
               {Object.keys(pendingChanges).length > 0 && (
                 <Button 
                   onClick={saveAllPendingChanges} 
                   variant="outline"
+                  size="sm"
                   disabled={isSaving}
                   className="bg-red-50 text-red-700 hover:bg-red-100 border-red-300 ring-2 ring-red-200 animate-pulse"
                 >
-                  <Save className={`w-4 h-4 mr-2 ${isSaving ? 'animate-spin' : ''}`} />
-                  {isSaving ? 'Guardando...' : `⚠️ Guardar Cambios (${Object.keys(pendingChanges).length})`}
+                  <Save className={`w-4 h-4 mr-1 ${isSaving ? 'animate-spin' : ''}`} />
+                  {isSaving ? 'Guardando...' : `⚠️ Guardar (${Object.keys(pendingChanges).length})`}
                 </Button>
               )}
-              {!accessToken && GOOGLE_CLIENT_ID && (
+              {!isAuthenticated && GOOGLE_CLIENT_ID && (
                 <Button 
                   onClick={authenticateWithGoogle} 
                   variant="outline"
+                  size="sm"
                   className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  disabled={authLoading}
                 >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Conectar con Google
+                  <CheckCircle className="w-4 h-4 mr-1" />
+                  {authLoading ? 'Conectando...' : 'Conectar'}
                 </Button>
               )}
-              {console.log('🔍 Debug botón OAuth:', { accessToken, GOOGLE_CLIENT_ID, showButton: !accessToken && GOOGLE_CLIENT_ID })}
-            </div>
+            </>
           ) : (
-            <div className="text-center">
-              <Button variant="outline" className="bg-red-50 text-red-700" disabled>
-                <AlertCircle className="w-4 h-4 mr-2" />
-                No Conectado
-              </Button>
-              <div className="text-xs text-gray-500 mt-1">
-                <p>Configura la API Key</p>
-              </div>
-            </div>
+            <Button variant="outline" size="sm" className="bg-red-50 text-red-700" disabled>
+              <AlertCircle className="w-4 h-4 mr-1" />
+              No Conectado
+            </Button>
           )}
-          <Button onClick={() => setShowAddForm(true)} disabled={!(GOOGLE_API_KEY || accessToken)}>
-            <Plus className="w-5 h-5 mr-2" />
+          <Button onClick={() => setShowAddForm(true)} size="sm" disabled={!(GOOGLE_API_KEY || accessToken)}>
+            <Plus className="w-4 h-4 mr-1" />
             Nueva Tarea
           </Button>
         </div>
       </div>
 
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="text-center">
-          <h3 className="text-2xl font-bold text-text">{totalTodos}</h3>
-          <p className="text-gray-600">Total Tareas</p>
+      {/* Stats Cards Compactas */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-3 text-center">
+          <h3 className="text-lg font-bold text-text">{totalTodos}</h3>
+          <p className="text-xs text-gray-600">Total</p>
         </Card>
-        <Card className="text-center">
-          <h3 className="text-2xl font-bold text-green-600">{completedTodos}</h3>
-          <p className="text-gray-600">Completadas</p>
+        <Card className="p-3 text-center">
+          <h3 className="text-lg font-bold text-green-600">{completedTodos}</h3>
+          <p className="text-xs text-gray-600">Completadas</p>
         </Card>
-        <Card className="text-center">
-          <h3 className="text-2xl font-bold text-yellow-600">{pendingTodos}</h3>
-          <p className="text-gray-600">Pendientes</p>
+        <Card className="p-3 text-center">
+          <h3 className="text-lg font-bold text-yellow-600">{pendingTodos}</h3>
+          <p className="text-xs text-gray-600">Pendientes</p>
         </Card>
-        <Card className="text-center">
-          <h3 className="text-2xl font-bold text-red-600">{highPriorityTodos}</h3>
-          <p className="text-gray-600">Prioridad Alta</p>
+        <Card className="p-3 text-center">
+          <h3 className="text-lg font-bold text-red-600">{highPriorityTodos}</h3>
+          <p className="text-xs text-gray-600">Alta Prioridad</p>
         </Card>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-          <div className="flex gap-4 flex-1">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Buscar tareas..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              />
-            </div>
-            <select
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value as any)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value="all">Todas las prioridades</option>
-              <option value="high">Alta prioridad</option>
-              <option value="medium">Media prioridad</option>
-              <option value="low">Baja prioridad</option>
-            </select>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value="all">Todas las tareas</option>
-              <option value="pending">Pendientes</option>
-              <option value="completed">Completadas</option>
-            </select>
+      {/* Filters Compactos */}
+      <Card className="p-3">
+        <div className="flex flex-col sm:flex-row gap-3 items-center">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar tareas..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            />
           </div>
+          <select
+            value={filterPriority}
+            onChange={(e) => setFilterPriority(e.target.value as any)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+          >
+            <option value="all">Todas las prioridades</option>
+            <option value="high">Alta prioridad</option>
+            <option value="medium">Media prioridad</option>
+            <option value="low">Baja prioridad</option>
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as any)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+          >
+            <option value="all">Todas las tareas</option>
+            <option value="pending">Pendientes</option>
+            <option value="completed">Completadas</option>
+          </select>
         </div>
       </Card>
 
-      {/* Todos List */}
-      <div className="space-y-4">
+      {/* Todos List Compacta */}
+      <div className="space-y-2">
         {filteredTodos.length === 0 ? (
-          <Card className="text-center py-12">
-            <CheckSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <Card className="text-center py-8">
+            <CheckSquare className="w-12 h-12 text-gray-400 mx-auto mb-3" />
             <h3 className="text-lg font-medium text-gray-600 mb-2">No hay tareas</h3>
-            <p className="text-gray-500 mb-4">
+            <p className="text-sm text-gray-500 mb-4">
               {searchTerm || filterPriority !== 'all' || filterStatus !== 'all' 
                 ? 'No se encontraron tareas con los filtros aplicados'
                 : 'Crea tu primera tarea para comenzar'
               }
             </p>
             {!searchTerm && filterPriority === 'all' && filterStatus === 'all' && (
-              <Button onClick={() => setShowAddForm(true)}>
+              <Button onClick={() => setShowAddForm(true)} size="sm">
                 <Plus className="w-4 h-4 mr-2" />
                 Crear Primera Tarea
               </Button>
@@ -1571,8 +1561,8 @@ export const Todo: React.FC = () => {
           </Card>
         ) : (
           filteredTodos.map((todo) => (
-            <Card key={todo.id} className={`transition-all duration-200 ${todo.completed ? 'opacity-75' : ''}`}>
-              <div className="flex items-start gap-4">
+            <Card key={todo.id} className={`p-3 transition-all duration-200 ${todo.completed ? 'opacity-75 bg-gray-50' : 'bg-white'}`}>
+              <div className="flex items-start gap-3">
                 <button
                   onClick={() => toggleTodo(todo.id)}
                   className={`mt-1 p-1 rounded transition-colors ${
@@ -1582,72 +1572,73 @@ export const Todo: React.FC = () => {
                   }`}
                 >
                   {todo.completed ? (
-                    <CheckSquare className="w-5 h-5" />
+                    <CheckSquare className="w-4 h-4" />
                   ) : (
-                    <Square className="w-5 h-5" />
+                    <Square className="w-4 h-4" />
                   )}
                 </button>
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <input
-                        type="text"
-                        value={todo.title || ''}
-                        onChange={(e) => handleTitleChange(todo.id, e.target.value)}
-                        className={`text-lg font-medium bg-transparent border-none outline-none w-full ${todo.completed ? 'line-through text-gray-500' : 'text-text'} hover:bg-gray-50 px-1 py-0.5 rounded`}
-                        placeholder="Sin título seleccionado"
-                      />
+                      {/* Título y descripción en una línea */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <input
+                          type="text"
+                          value={todo.title || ''}
+                          onChange={(e) => handleTitleChange(todo.id, e.target.value)}
+                          className={`text-base font-medium bg-transparent border-none outline-none flex-1 ${todo.completed ? 'line-through text-gray-500' : 'text-text'} hover:bg-gray-50 px-1 py-0.5 rounded`}
+                          placeholder="Sin título"
+                        />
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={todo.priority}
+                            onChange={(e) => handlePriorityChange(todo.id, e.target.value as 'low' | 'medium' | 'high')}
+                            className={`px-2 py-1 rounded-full border text-xs ${getPriorityColor(todo.priority)}`}
+                          >
+                            <option value="low">Baja</option>
+                            <option value="medium">Media</option>
+                            <option value="high">Alta</option>
+                          </select>
+                          <select
+                            value={todo.completed ? 'completado' : 'pendiente'}
+                            onChange={(e) => handleStatusChange(todo.id, e.target.value)}
+                            className={`px-2 py-1 rounded-full border text-xs ${
+                              todo.completed 
+                                ? 'bg-green-50 text-green-700 border-green-200' 
+                                : 'bg-gray-50 text-gray-600 border-gray-200'
+                            }`}
+                          >
+                            <option value="pendiente">Pendiente</option>
+                            <option value="completado">Completada</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Descripción compacta */}
                       <textarea
                         value={todo.description || ''}
                         onChange={(e) => handleDescriptionChange(todo.id, e.target.value)}
-                        className={`text-sm mt-1 bg-transparent border-none outline-none w-full resize-none ${todo.completed ? 'text-gray-400' : 'text-text-secondary'} hover:bg-gray-50 px-1 py-0.5 rounded`}
-                        placeholder="Sin descripción seleccionada"
-                        rows={2}
+                        className={`text-sm bg-transparent border-none outline-none w-full resize-none ${todo.completed ? 'text-gray-400' : 'text-text-secondary'} hover:bg-gray-50 px-1 py-0.5 rounded`}
+                        placeholder="Sin descripción"
+                        rows={1}
                       />
-                      <div className={`text-xs mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded ${todo.completed ? 'opacity-60' : ''}`}>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-yellow-800">Notas:</span>
-                          {pendingChanges[todo.id] && (
-                            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
-                              Cambios pendientes
-                            </span>
-                          )}
-                        </div>
-                        <textarea
-                          value={todo.notes || ''}
-                          onChange={(e) => handleNotesChange(todo.id, e.target.value)}
-                          className={`text-yellow-700 mt-1 w-full bg-transparent border-none outline-none resize-none hover:bg-yellow-100 px-1 py-0.5 rounded ${
-                            pendingChanges[todo.id] ? 'ring-2 ring-orange-300' : ''
-                          }`}
-                          placeholder="Agregar notas..."
-                          rows={2}
-                        />
-                      </div>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                        <select
-                          value={todo.priority}
-                          onChange={(e) => handlePriorityChange(todo.id, e.target.value as 'low' | 'medium' | 'high')}
-                          className={`px-2 py-1 rounded-full border text-xs ${getPriorityColor(todo.priority)}`}
-                        >
-                          <option value="low">Baja</option>
-                          <option value="medium">Media</option>
-                          <option value="high">Alta</option>
-                        </select>
-                        <select
-                          value={todo.completed ? 'completado' : 'pendiente'}
-                          onChange={(e) => handleStatusChange(todo.id, e.target.value)}
-                          className={`px-2 py-1 rounded-full border text-xs flex items-center gap-1 ${
-                            todo.completed 
-                              ? 'bg-green-50 text-green-700 border-green-200' 
-                              : 'bg-gray-50 text-gray-600 border-gray-200'
-                          }`}
-                        >
-                          <option value="pendiente">Pendiente</option>
-                          <option value="completado">Completada</option>
-                        </select>
+
+                      {/* Información en una línea compacta */}
+                      <div className="flex items-center gap-4 mt-2 text-xs">
                         <div className="flex items-center gap-1">
-                          <span className={`w-3 h-3 rounded-full ${todo.assignedTo ? 'bg-blue-500' : 'bg-gray-300'}`}></span>
+                          <Calendar className="w-3 h-3 text-blue-600" />
+                          <input
+                            type="date"
+                            value={todo.dueDate ? new Date(todo.dueDate).toISOString().split('T')[0] : ''}
+                            onChange={(e) => handleDueDateChange(todo.id, e.target.value)}
+                            className="text-blue-800 bg-transparent border-none outline-none cursor-pointer hover:bg-blue-50 px-1 py-0.5 rounded text-xs"
+                            title="Fecha de entrega"
+                          />
+                        </div>
+                        
+                        <div className="flex items-center gap-1">
+                          <span className={`w-2 h-2 rounded-full ${todo.assignedTo ? 'bg-blue-500' : 'bg-gray-300'}`}></span>
                           <div className="relative">
                             <select
                               value={todo.assignedTo || ''}
@@ -1660,20 +1651,20 @@ export const Todo: React.FC = () => {
                               }}
                               className="px-2 py-1 rounded-full border text-xs bg-white border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
                             >
-                              <option value="">Sin encargado seleccionado</option>
+                              <option value="">Sin encargado</option>
                               {availableAssignees.map((assignee) => (
                                 <option key={assignee} value={assignee}>
                                   {assignee}
                                 </option>
                               ))}
                               <option value="add_new" className="text-blue-600 font-medium">
-                                + Agregar encargado
+                                + Agregar
                               </option>
                             </select>
                             
                             {/* Modal para agregar nuevo encargado */}
                             {showAddAssigneeFor === todo.id && (
-                              <div className="assignee-modal absolute top-8 left-0 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-64">
+                              <div className="assignee-modal absolute top-8 left-0 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-48">
                                 <div className="flex flex-col gap-2">
                                   <label className="text-xs font-medium text-gray-700">
                                     Nuevo encargado:
@@ -1709,44 +1700,41 @@ export const Todo: React.FC = () => {
                             )}
                           </div>
                         </div>
+
+                        {pendingChanges[todo.id] && (
+                          <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                            Cambios pendientes
+                          </span>
+                        )}
                       </div>
-                      
-                      {/* Fechas más claras y separadas */}
-                      <div className="flex items-center gap-6 mt-3 text-sm">
-                        <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg">
-                          <Calendar className="w-4 h-4 text-blue-600" />
-                          <div>
-                            <span className="text-xs text-blue-600 font-medium">Fecha de entrega:</span>
-                            <input
-                              type="date"
-                              value={todo.dueDate ? new Date(todo.dueDate).toISOString().split('T')[0] : ''}
-                              onChange={(e) => handleDueDateChange(todo.id, e.target.value)}
-                              className="text-blue-800 font-semibold bg-transparent border-none outline-none cursor-pointer hover:bg-blue-100 px-1 py-0.5 rounded"
-                              title="Haz clic para cambiar la fecha de entrega"
-                            />
+
+                      {/* Notas compactas */}
+                      {todo.notes && (
+                        <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-yellow-800">Notas:</span>
                           </div>
+                          <textarea
+                            value={todo.notes || ''}
+                            onChange={(e) => handleNotesChange(todo.id, e.target.value)}
+                            className={`text-yellow-700 w-full bg-transparent border-none outline-none resize-none hover:bg-yellow-100 px-1 py-0.5 rounded text-xs ${
+                              pendingChanges[todo.id] ? 'ring-2 ring-orange-300' : ''
+                            }`}
+                            placeholder="Agregar notas..."
+                            rows={1}
+                          />
                         </div>
-                        
-                        <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg">
-                          <Clock className="w-4 h-4 text-gray-600" />
-                          <div>
-                            <span className="text-xs text-gray-600 font-medium">Creada:</span>
-                            <div className="text-gray-800 font-semibold">
-                              {formatDate(todo.createdAt)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                     
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-1 ml-2">
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-red-600 hover:text-red-700"
+                        className="text-red-600 hover:text-red-700 p-1"
                         onClick={() => deleteTodo(todo.id)}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3 h-3" />
                       </Button>
                     </div>
                   </div>
@@ -1757,13 +1745,13 @@ export const Todo: React.FC = () => {
         )}
       </div>
 
-      {/* Add Todo Modal */}
+      {/* Add Todo Modal Compacto */}
       {showAddForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-text mb-4">Nueva Tarea</h3>
+          <div className="bg-white rounded-lg p-4 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-text mb-3">Nueva Tarea</h3>
             
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Título *
@@ -1772,7 +1760,7 @@ export const Todo: React.FC = () => {
                   type="text"
                   value={newTodo.title}
                   onChange={(e) => setNewTodo({...newTodo, title: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   placeholder="Título de la tarea"
                 />
               </div>
@@ -1782,28 +1770,15 @@ export const Todo: React.FC = () => {
                   Descripción
                 </label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={newTodo.description}
                   onChange={(e) => setNewTodo({...newTodo, description: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   placeholder="Descripción de la tarea (opcional)"
                 />
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notas
-                </label>
-                <textarea
-                  rows={2}
-                  value={newTodo.notes}
-                  onChange={(e) => setNewTodo({...newTodo, notes: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                  placeholder="Notas adicionales (opcional)"
-                />
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Prioridad
@@ -1811,7 +1786,7 @@ export const Todo: React.FC = () => {
                   <select
                     value={newTodo.priority}
                     onChange={(e) => setNewTodo({...newTodo, priority: e.target.value as any})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <option value="low">Baja</option>
                     <option value="medium">Media</option>
@@ -1827,31 +1802,44 @@ export const Todo: React.FC = () => {
                     type="date"
                     value={newTodo.dueDate}
                     onChange={(e) => setNewTodo({...newTodo, dueDate: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
                 </div>
               </div>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Encargado de la tarea
+                  Encargado
                 </label>
                 <input
                   type="text"
                   value={newTodo.assignedTo}
                   onChange={(e) => setNewTodo({...newTodo, assignedTo: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   placeholder="Nombre del encargado (opcional)"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notas
+                </label>
+                <textarea
+                  rows={2}
+                  value={newTodo.notes}
+                  onChange={(e) => setNewTodo({...newTodo, notes: e.target.value})}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  placeholder="Notas adicionales (opcional)"
                 />
               </div>
             </div>
             
-            <div className="flex gap-2 mt-6">
-              <Button onClick={handleAddTodo} disabled={!newTodo.title.trim()}>
-                <Plus className="w-4 h-4 mr-2" />
+            <div className="flex gap-2 mt-4">
+              <Button onClick={handleAddTodo} disabled={!newTodo.title.trim()} size="sm">
+                <Plus className="w-4 h-4 mr-1" />
                 Crear Tarea
               </Button>
-              <Button variant="outline" onClick={() => setShowAddForm(false)}>
+              <Button variant="outline" onClick={() => setShowAddForm(false)} size="sm">
                 Cancelar
               </Button>
             </div>

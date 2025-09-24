@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Plus, Search, Filter, Download, Eye, Edit, Trash2, Phone, Mail, MapPin, Calendar, User, Building, RefreshCw, CheckCircle, AlertCircle, X, Save } from 'lucide-react';
+import { useGoogleAuth } from '../../services/googleAuthService';
 
 // Importar el logo para el PDF
 import logoImage from '../../assets/logo_im.png';
@@ -55,42 +56,21 @@ export const CRM: React.FC = () => {
   const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
   
-  // Estados para OAuth2
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [refreshToken, setRefreshToken] = useState<string | null>(null);
+  // Usar el servicio centralizado de autenticación con Google
+  const { 
+    isAuthenticated, 
+    accessToken, 
+    authenticate, 
+    getValidToken, 
+    isLoading: authLoading, 
+    error: authError 
+  } = useGoogleAuth();
 
-  // Función para guardar token en localStorage
-  const saveTokenToStorage = (token: string) => {
-    try {
-      // Los tokens de Google OAuth2 expiran en 1 hora (3600 segundos)
-      const expiryTime = Date.now() + (3600 * 1000);
-      
-      localStorage.setItem('google_access_token', token);
-      localStorage.setItem('google_token_expiry', expiryTime.toString());
-      
-      console.log('💾 Token guardado en localStorage, expira en:', new Date(expiryTime).toLocaleString());
-    } catch (err) {
-      console.error('Error al guardar token en localStorage:', err);
-    }
-  };
 
-  // Función para limpiar token del localStorage
-  const clearTokenFromStorage = () => {
-    try {
-      localStorage.removeItem('google_access_token');
-      localStorage.removeItem('google_token_expiry');
-      console.log('🗑️ Token eliminado del localStorage');
-    } catch (err) {
-      console.error('Error al limpiar token del localStorage:', err);
-    }
-  };
 
-  // Función para cerrar sesión
+  // Función para cerrar sesión usando el servicio centralizado
   const handleLogout = () => {
-    setAccessToken(null);
-    setIsAuthenticated(false);
-    clearTokenFromStorage();
+    logout();
     setSuccessMessage('✅ Sesión cerrada exitosamente');
     setError(null);
     
@@ -101,135 +81,17 @@ export const CRM: React.FC = () => {
     console.log('👋 Sesión cerrada, datos limpiados');
   };
 
-  // Función para autenticación OAuth2 (Authorization Code Flow)
-  const authenticateWithGoogle = () => {
-    try {
-      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-        `client_id=${GOOGLE_CLIENT_ID}&` +
-        `redirect_uri=${encodeURIComponent(window.location.origin + '/dashboard/crm')}&` +
-        `scope=${encodeURIComponent('https://www.googleapis.com/auth/spreadsheets')}&` +
-        `response_type=code&` +
-        `access_type=offline&` +
-        `prompt=consent`;
-
-      console.log('🔐 Redirigiendo a Google OAuth2...');
-      window.location.href = googleAuthUrl;
-
-    } catch (err) {
-      console.error('Error en autenticación:', err);
-      setError('Error en la autenticación con Google');
-    }
+  // Función para autenticación usando el servicio centralizado
+  const authenticateWithGoogle = async () => {
+    await authenticate();
   };
 
-  // Función para intercambiar código por tokens
-  const exchangeCodeForTokens = async (code: string) => {
-    try {
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: GOOGLE_CLIENT_ID,
-          client_secret: GOOGLE_CLIENT_SECRET || '',
-          code: code,
-          grant_type: 'authorization_code',
-          redirect_uri: window.location.origin + '/dashboard/crm',
-        }),
-      });
 
-      const data = await response.json();
-      
-      if (data.access_token) {
-        setAccessToken(data.access_token);
-        if (data.refresh_token) {
-          setRefreshToken(data.refresh_token);
-          localStorage.setItem('google_refresh_token', data.refresh_token);
-        }
-        localStorage.setItem('google_access_token', data.access_token);
-        localStorage.setItem('google_token_expires', (Date.now() + (data.expires_in * 1000)).toString());
-        setIsAuthenticated(true);
-        console.log('✅ Tokens obtenidos exitosamente');
-        return data.access_token;
-      } else {
-        throw new Error(data.error_description || 'Error al obtener tokens');
-      }
-    } catch (error) {
-      console.error('❌ Error al intercambiar código por tokens:', error);
-      setError('Error al obtener tokens de Google');
-      return null;
-    }
-  };
 
-  // Función para verificar si el token es válido
-  const isTokenValid = () => {
-    const expiresAt = localStorage.getItem('google_token_expires');
-    if (expiresAt && parseInt(expiresAt) > Date.now()) {
-      return true;
-    }
-    return false;
-  };
 
-  // Función para refrescar el access token
-  const refreshAccessToken = async () => {
-    try {
-      const storedRefreshToken = localStorage.getItem('google_refresh_token');
-      if (!storedRefreshToken) {
-        console.log('❌ No hay refresh token disponible');
-        throw new Error('No hay refresh token disponible');
-      }
-
-      console.log('🔄 Refrescando access token con refresh token...');
-
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: GOOGLE_CLIENT_ID,
-          client_secret: GOOGLE_CLIENT_SECRET || '',
-          refresh_token: storedRefreshToken,
-          grant_type: 'refresh_token',
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (data.access_token) {
-        setAccessToken(data.access_token);
-        localStorage.setItem('google_access_token', data.access_token);
-        if (data.expires_in) {
-          localStorage.setItem('google_token_expires', (Date.now() + (data.expires_in * 1000)).toString());
-        }
-        console.log('✅ Access token refrescado exitosamente');
-        console.log('⏰ Token expira en:', data.expires_in, 'segundos');
-        return data.access_token;
-      } else {
-        console.error('❌ Error en respuesta de refresh:', data);
-        throw new Error(data.error_description || 'Error al refrescar token');
-      }
-    } catch (error) {
-      console.error('❌ Error al refrescar token:', error);
-      setError('Error al refrescar token de Google');
-      return null;
-    }
-  };
-
-  // Función para obtener un token válido (refresca si es necesario)
-  const getValidToken = async () => {
-    console.log('🔍 Verificando token válido...');
-    
-    if (isTokenValid()) {
-      const token = localStorage.getItem('google_access_token');
-      if (token) {
-        console.log('✅ Token válido encontrado');
-        return token;
-      }
-    }
-    
-    console.log('🔄 Token expirado o no válido, refrescando...');
-    return await refreshAccessToken();
+  // Función para obtener token válido usando el servicio centralizado
+  const getValidAccessToken = async () => {
+    return await getValidToken();
   };
 
   // Función para obtener datos de Google Sheets
@@ -345,7 +207,7 @@ export const CRM: React.FC = () => {
       let headers: HeadersInit = { 'Content-Type': 'application/json' };
       
       if (accessToken) {
-        const token = await getValidToken();
+        const token = await getValidAccessToken();
         if (!token) {
           setError('No se pudo obtener token válido para escribir');
           return;
@@ -447,7 +309,7 @@ export const CRM: React.FC = () => {
       let headers: HeadersInit = { 'Content-Type': 'application/json' };
       
       if (accessToken) {
-        const token = await getValidToken();
+        const token = await getValidAccessToken();
         if (!token) {
           setError('No se pudo obtener token válido para escribir');
           return;
@@ -518,7 +380,7 @@ export const CRM: React.FC = () => {
       let headers: HeadersInit = { 'Content-Type': 'application/json' };
       
       if (accessToken) {
-        const token = await getValidToken();
+        const token = await getValidAccessToken();
         if (!token) {
           setError('No se pudo obtener token válido para escribir');
           return;
@@ -1037,33 +899,28 @@ export const CRM: React.FC = () => {
     const storedAccessToken = localStorage.getItem('google_access_token');
     const storedRefreshToken = localStorage.getItem('google_refresh_token');
     
+    // Función local para verificar si el token es válido
+    const isTokenValidLocal = () => {
+      const expiresAt = localStorage.getItem('google_token_expires');
+      if (expiresAt && parseInt(expiresAt) > Date.now()) {
+        return true;
+      }
+      return false;
+    };
+
     console.log('🔍 Estado de tokens:', {
       hasAccessToken: !!storedAccessToken,
       hasRefreshToken: !!storedRefreshToken,
-      isTokenValid: isTokenValid()
+      isTokenValid: isTokenValidLocal()
     });
     
-    if (storedAccessToken && isTokenValid()) {
-      setAccessToken(storedAccessToken);
-      setIsAuthenticated(true);
-      console.log('🔐 Token válido encontrado, cargando datos...');
+    // Verificar si ya estamos autenticados con el servicio centralizado
+    if (isAuthenticated && accessToken) {
+      console.log('🔐 Ya autenticado con servicio centralizado, cargando datos...');
       fetchClientsFromSheets();
-    } else if (storedRefreshToken) {
-      console.log('🔄 Token expirado, refrescando con refresh token...');
-      refreshAccessToken().then((token) => {
-        if (token) {
-          setIsAuthenticated(true);
-          console.log('✅ Token refrescado exitosamente, cargando datos...');
-          fetchClientsFromSheets();
-        } else {
-          console.log('⚠️ No se pudo refrescar token, usando API Key...');
-          if (GOOGLE_API_KEY) {
-            fetchClientsFromSheets();
-          } else {
-            loadSampleData();
-          }
-        }
-      });
+    } else if (storedAccessToken && isTokenValidLocal()) {
+      console.log('🔐 Token válido encontrado en localStorage, cargando datos...');
+      fetchClientsFromSheets();
     } else if (GOOGLE_API_KEY) {
       console.log('🔑 API Key encontrada, cargando desde Google Sheets...');
       fetchClientsFromSheets();
@@ -1323,10 +1180,10 @@ export const CRM: React.FC = () => {
             <Button 
               onClick={authenticateWithGoogle} 
               className="bg-blue-600 text-white hover:bg-blue-700 px-6 py-3"
-              disabled={!GOOGLE_CLIENT_ID}
+              disabled={!GOOGLE_CLIENT_ID || authLoading}
             >
               <CheckCircle className="w-5 h-5 mr-2" />
-              Conectar con Google
+              {authLoading ? 'Conectando...' : 'Conectar con Google'}
             </Button>
             {!GOOGLE_CLIENT_ID && (
               <p className="text-sm text-red-600 mt-2">

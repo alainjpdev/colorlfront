@@ -76,9 +76,21 @@ class MenuAPI {
     });
   }
 
+  // Restaurar elemento de menú oculto
+  async restoreMenuItem(id: string): Promise<{ success: boolean; message: string; item: DynamicMenuItem }> {
+    return this.request<{ success: boolean; message: string; item: DynamicMenuItem }>(`/api/menu/${id}/restore`, {
+      method: 'PUT',
+    });
+  }
+
+  // Obtener todos los menús incluyendo los ocultos
+  async getAllMenuItemsWithHidden(): Promise<DynamicMenuItem[]> {
+    return this.request<DynamicMenuItem[]>('/api/menu/all?includeHidden=true');
+  }
+
   // Obtener iconos disponibles
   async getAvailableIcons(): Promise<string[]> {
-    // Lista de iconos disponibles de Lucide React
+    // Lista de iconos disponibles de Lucide React - v3 (sin duplicaciones)
     return [
       'Home', 'Users', 'FileText', 'ShoppingCart', 'Building2', 'CheckSquare',
       'Settings', 'User', 'Plus', 'List', 'BookOpen', 'Calendar', 'ClipboardList',
@@ -97,7 +109,7 @@ class MenuAPI {
       'TrendingDown', 'Activity', 'Pulse', 'Zap', 'Battery', 'BatteryLow',
       'Wifi', 'WifiOff', 'Bluetooth', 'BluetoothOff', 'Radio', 'Tv',
       'Monitor', 'Laptop', 'Smartphone', 'Tablet', 'Watch', 'Headphones',
-      'Speaker', 'Mic', 'MicOff', 'Volume1', 'Volume2', 'VolumeX'
+      'Speaker', 'Mic', 'MicOff', 'Volume1'
     ];
   }
 }

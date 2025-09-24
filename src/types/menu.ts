@@ -7,6 +7,7 @@ export interface DynamicMenuItem {
   order: number;
   isActive: boolean;
   role: 'admin' | 'teacher' | 'student';
+  googleSheetUrl?: string; // URL de Google Sheets para enlazar
   submenu?: {
     id: string;
     to: string;
@@ -26,6 +27,7 @@ export interface CreateMenuItemData {
   label: string;
   order?: number;
   role: 'admin' | 'teacher' | 'student';
+  googleSheetUrl?: string; // URL de Google Sheets para enlazar
   submenu?: {
     to: string;
     icon: string;
@@ -41,6 +43,7 @@ export interface UpdateMenuItemData {
   label?: string;
   order?: number;
   isActive?: boolean;
+  googleSheetUrl?: string; // URL de Google Sheets para enlazar
   submenu?: {
     id?: string;
     to: string;

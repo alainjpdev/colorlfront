@@ -2,12 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Animaciones para notificaciones en tiempo real */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s ease-out;
+}
+
 /* Estilos globales para tipografía */
 body {
   color: rgb(13, 109, 177);
 }
 
-/* Asegurar que los elementos de texto usen el color de marca */
-.text-brand-blue {
-  color: rgb(13, 109, 177);
+/* Scrollbar personalizado */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }

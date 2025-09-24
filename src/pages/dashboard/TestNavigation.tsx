@@ -1,12 +1,14 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
+import { GoogleAuthTest } from '../../components/GoogleAuthTest';
 
 export const TestNavigation: React.FC = () => {
   const location = useLocation();
 
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-6">
       <h1 className="text-2xl font-bold mb-4">Test de Navegación</h1>
+      
       <div className="bg-green-100 p-4 rounded-lg">
         <p className="text-green-800">
           <strong>Ruta actual:</strong> {location.pathname}
@@ -15,6 +17,8 @@ export const TestNavigation: React.FC = () => {
           <strong>Estado:</strong> La navegación está funcionando correctamente
         </p>
       </div>
+
+      <GoogleAuthTest />
     </div>
   );
 };

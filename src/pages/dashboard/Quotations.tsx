@@ -4,12 +4,40 @@ import { Button } from '../../components/ui/Button';
 import { Plus, Search, Filter, Download, Eye, Edit, Trash2, RefreshCw, Calculator, Save, Mail, FileText, CheckCircle, AlertCircle } from 'lucide-react';
 import { quotationAPI } from '../../services/api';
 import { Quotation, CreateQuotationData } from '../../types';
+import { useGoogleAuth } from '../../services/googleAuthService';
+import jsPDF from 'jspdf';
 
 // Importar el logo para el PDF
 import logoImage from '../../assets/logo.webp';
 
 export const Quotations: React.FC = () => {
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([
+    {
+      id: '1',
+      sku: 'PT-002-BC',
+      codigointerno: 'PT-002-BC',
+      codigo: 'PT-002-BC',
+      code: 'PT-002-BC',
+      nombre: 'COLORLAND PLUS MATE 19LT',
+      nombredelproducto: 'COLORLAND PLUS MATE 19LT',
+      titulo: 'COLORLAND PLUS MATE 19LT',
+      title: 'COLORLAND PLUS MATE 19LT',
+      producto: 'COLORLAND PLUS MATE 19LT',
+      product: 'COLORLAND PLUS MATE 19LT',
+      precio: '$4,599.98',
+      preciopublicoads: '$4,599.98',
+      price: '$4,599.98',
+      nuevosprecioscolorland: '$4,599.98',
+      preciopublico: '$4,599.98',
+      categoria: 'Pinturas',
+      category: 'Pinturas',
+      categoría: 'Pinturas',
+      descripcion: 'Pintura Colorland Plus Mate 19 litros',
+      description: 'Pintura Colorland Plus Mate 19 litros',
+      desc: 'Pintura Colorland Plus Mate 19 litros',
+      detalle: 'Pintura Colorland Plus Mate 19 litros'
+    }
+  ]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [currentQuotation, setCurrentQuotation] = useState<any>({
     clientName: '',
@@ -34,6 +62,7 @@ export const Quotations: React.FC = () => {
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
   const [selectedQuotation, setSelectedQuotation] = useState<any>(null);
   
@@ -41,9 +70,15 @@ export const Quotations: React.FC = () => {
   const [crmClients, setCrmClients] = useState<any[]>([]);
   const [crmLoading, setCrmLoading] = useState(false);
   
-  // Estados para autenticación OAuth2 (copiados de Todo.tsx)
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  // Usar el servicio centralizado de autenticación con Google
+  const { 
+    isAuthenticated, 
+    accessToken, 
+    authenticate, 
+    getValidToken, 
+    isLoading: authLoading, 
+    error: authError 
+  } = useGoogleAuth();
   
   // Estados para búsqueda de productos
   const [productSearchTerm, setProductSearchTerm] = useState('');
@@ -71,9 +106,8 @@ export const Quotations: React.FC = () => {
   const GOOGLE_SHEET_NAME = 'Sheet1'; // Nombre de la hoja por defecto
   const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY; // API Key desde .env
   
-  // Configuración OAuth2 (copiada de Todo.tsx)
+  // Configuración OAuth2
   const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
   
   // Configuración del CRM (Google Sheets)
   const CRM_SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID || '1_Uwb2TZ8L5OB20C7NEn01YZGWyjXINRLuZ6KH9ND-yA';
@@ -82,32 +116,75 @@ export const Quotations: React.FC = () => {
     // Función para agregar nuevo cliente al CRM
   const addClientToCrm = async () => {
     try {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CRM_SHEET_ID}/values/${CRM_SHEET_NAME}:append?valueInputOption=USER_ENTERED&key=${GOOGLE_API_KEY}`;
+      console.log('🔄 Agregando nuevo cliente al CRM...');
+      console.log('📋 Datos del cliente:', newClient);
+      console.log('🔑 CRM_SHEET_ID:', CRM_SHEET_ID);
+      console.log('📋 CRM_SHEET_NAME:', CRM_SHEET_NAME);
+      console.log('🔑 GOOGLE_API_KEY:', GOOGLE_API_KEY ? 'Configurada' : 'No configurada');
+      console.log('🔑 OAuth2 autenticado:', isAuthenticated);
+      
+      const clientData = [
+        newClient.name,
+        newClient.contactPerson,
+        newClient.email,
+        newClient.phone,
+        newClient.address,
+        newClient.status,
+        '0', // totalProjects
+        '0', // totalRevenue
+        new Date().toISOString().split('T')[0], // lastContact
+        newClient.notes
+      ];
+      
+      console.log('📊 Datos a enviar:', clientData);
+      
+      // Usar OAuth2 si está disponible, sino API Key
+      let url: string;
+      let headers: HeadersInit = { 'Content-Type': 'application/json' };
+      
+      if (isAuthenticated && accessToken) {
+        try {
+          const validToken = await getValidAccessToken();
+          url = `https://sheets.googleapis.com/v4/spreadsheets/${CRM_SHEET_ID}/values/${CRM_SHEET_NAME}:append?valueInputOption=USER_ENTERED`;
+          headers['Authorization'] = `Bearer ${validToken}`;
+          console.log('🔑 Usando OAuth2 para agregar cliente');
+        } catch (err) {
+          console.error('Error al obtener token válido:', err);
+          throw new Error('No se pudo obtener un token válido para agregar el cliente');
+        }
+      } else {
+        url = `https://sheets.googleapis.com/v4/spreadsheets/${CRM_SHEET_ID}/values/${CRM_SHEET_NAME}:append?valueInputOption=USER_ENTERED&key=${GOOGLE_API_KEY}`;
+        console.log('🔑 Usando API Key para agregar cliente');
+      }
+      
+      console.log('🔗 URL de append:', url);
       
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
-          values: [[
-            newClient.name,
-            newClient.contactPerson,
-            newClient.email,
-            newClient.phone,
-            newClient.address,
-            newClient.status,
-            '0', // totalProjects
-            '0', // totalRevenue
-            new Date().toISOString().split('T')[0], // lastContact
-            newClient.notes
-          ]]
+          values: [clientData]
         })
       });
 
+      console.log('📡 Respuesta del servidor:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error('Error al agregar cliente al CRM');
+        const errorText = await response.text();
+        console.error('❌ Error en respuesta del servidor:', response.status, response.statusText);
+        console.error('❌ Detalles del error:', errorText);
+        
+        if (response.status === 401) {
+          throw new Error('No autorizado para escribir en este Google Sheet. Verifica que estés autenticado con Google o que el sheet esté compartido correctamente.');
+        } else if (response.status === 403) {
+          throw new Error('Permisos insuficientes para escribir en este Google Sheet.');
+        } else {
+          throw new Error(`Error al agregar cliente al CRM: ${response.status} ${response.statusText}`);
+        }
       }
+
+      const responseData = await response.json();
+      console.log('✅ Cliente agregado exitosamente:', responseData);
 
       // Limpiar formulario y cerrar modal
       setNewClient({
@@ -124,12 +201,68 @@ export const Quotations: React.FC = () => {
       // Recargar clientes del CRM
       await fetchCrmClients();
       
-      // Mostrar mensaje de éxito
-      alert('✅ Cliente agregado exitosamente al CRM');
+      // Mostrar popup de éxito
+      setShowSuccessPopup(true);
+      
+      // Cerrar el popup después de 3 segundos
+      setTimeout(() => {
+        setShowSuccessPopup(false);
+      }, 3000);
       
     } catch (err: any) {
-      console.error('Error al agregar cliente:', err);
-      alert('❌ Error al agregar cliente: ' + err.message);
+      console.error('❌ Error al agregar cliente:', err);
+      
+      // Si es error 401 (token expirado), redirigir a reconexión
+      if (err.message && err.message.includes('401')) {
+        console.log('🔄 Token expirado, redirigiendo a reconexión...');
+        alert('⚠️ Tu sesión de Google ha expirado. Serás redirigido para reconectarte.');
+        
+        // Limpiar tokens y forzar reconexión
+        localStorage.removeItem('google-auth-storage');
+        
+        // Redirigir a reconexión después de 2 segundos
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+        
+        return;
+      }
+      
+      // Para otros errores, mostrar mensaje normal
+      alert('❌ Error al agregar cliente: ' + (err.message || 'Error desconocido'));
+    }
+  };
+
+  // Función para reconectar con Google (refrescar permisos)
+  const reconnectWithGoogle = async () => {
+    try {
+      console.log('🔄 Reconectando con Google para refrescar permisos...');
+      
+      // Limpiar tokens existentes del localStorage
+      localStorage.removeItem('google_access_token');
+      localStorage.removeItem('google_refresh_token');
+      localStorage.removeItem('google_auth_state');
+      localStorage.removeItem('google-auth-storage'); // Zustand storage
+      
+      // Redirigir a Google OAuth con prompt=consent para forzar nueva autorización
+      const redirectUri = `${window.location.origin}/dashboard`;
+      const scope = 'https://www.googleapis.com/auth/spreadsheets';
+      
+      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID!);
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('scope', scope);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('access_type', 'offline');
+      authUrl.searchParams.set('state', 'quotations_reconnect');
+      authUrl.searchParams.set('prompt', 'consent'); // Forzar nueva autorización
+      
+      console.log('🔗 Redirigiendo a Google OAuth para reconectar...');
+      window.location.href = authUrl.toString();
+      
+    } catch (err) {
+      console.error('Error al reconectar con Google:', err);
+      alert('Error al reconectar con Google');
     }
   };
 
@@ -167,7 +300,7 @@ export const Quotations: React.FC = () => {
         },
         body: new URLSearchParams({
           client_id: GOOGLE_CLIENT_ID!,
-          client_secret: GOOGLE_CLIENT_SECRET!,
+          client_secret: import.meta.env.VITE_GOOGLE_CLIENT_SECRET || '',
           code: code,
           grant_type: 'authorization_code',
           redirect_uri: window.location.origin + '/dashboard/quotations'
@@ -186,98 +319,12 @@ export const Quotations: React.FC = () => {
     }
   };
 
-  // Función para guardar tokens en localStorage
-  const saveTokensToStorage = (accessToken: string, refreshToken?: string, expiresIn?: number) => {
-    try {
-      const expiryTime = expiresIn ? Date.now() + (expiresIn * 1000) : Date.now() + (3600 * 1000);
-      localStorage.setItem('google_access_token_quotations', accessToken);
-      localStorage.setItem('google_token_expiry_quotations', expiryTime.toString());
-      
-      if (refreshToken) {
-        localStorage.setItem('google_refresh_token_quotations', refreshToken);
-      }
-    } catch (err) {
-      console.error('Error al guardar tokens:', err);
-    }
-  };
 
-  // Función para renovar token usando refresh token
-  const refreshAccessToken = async () => {
-    try {
-      const refreshToken = localStorage.getItem('google_refresh_token_quotations');
-      if (!refreshToken) {
-        throw new Error('No hay refresh token disponible');
-      }
 
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: GOOGLE_CLIENT_ID!,
-          client_secret: GOOGLE_CLIENT_SECRET!,
-          refresh_token: refreshToken,
-          grant_type: 'refresh_token'
-        })
-      });
 
-      if (!response.ok) {
-        throw new Error('Error al renovar token');
-      }
-
-      const data = await response.json();
-      saveTokensToStorage(data.access_token, refreshToken, data.expires_in);
-      setAccessToken(data.access_token);
-      
-      return data.access_token;
-    } catch (err) {
-      console.error('Error al renovar token:', err);
-      // Si falla la renovación, limpiar tokens y requerir nueva autorización
-      localStorage.removeItem('google_access_token_quotations');
-      localStorage.removeItem('google_refresh_token_quotations');
-      localStorage.removeItem('google_token_expiry_quotations');
-      setAccessToken(null);
-      setIsAuthenticated(false);
-      throw err;
-    }
-  };
-
-  // Función para verificar si el token es válido
-  const isTokenValid = () => {
-    try {
-      const token = localStorage.getItem('google_access_token_quotations');
-      const expiry = localStorage.getItem('google_token_expiry_quotations');
-      
-      if (!token || !expiry) return false;
-      
-      const now = Date.now();
-      const expiryTime = parseInt(expiry);
-      
-      return now < expiryTime;
-    } catch (err) {
-      console.error('Error al verificar token:', err);
-      return false;
-    }
-  };
-
-  // Función para obtener token válido (renovando si es necesario)
-  const getValidToken = async () => {
-    if (accessToken && isTokenValid()) {
-      return accessToken;
-    }
-    
-    if (accessToken && !isTokenValid()) {
-      try {
-        console.log('🔄 Token expirado, renovando...');
-        return await refreshAccessToken();
-      } catch (err) {
-        console.error('Error al renovar token:', err);
-        throw new Error('No se pudo renovar el token de acceso');
-      }
-    }
-    
-    throw new Error('No hay token de acceso disponible');
+  // Función para obtener token válido usando el servicio centralizado
+  const getValidAccessToken = async () => {
+    return await getValidToken();
   };
 
   // Función para obtener clientes del CRM
@@ -339,6 +386,23 @@ export const Quotations: React.FC = () => {
       }
     } catch (err: any) {
       console.error('❌ Error al cargar clientes del CRM:', err);
+      
+      // Si es error 401 (token expirado), redirigir a reconexión
+      if (err.message && err.message.includes('401')) {
+        console.log('🔄 Token expirado al cargar CRM, redirigiendo a reconexión...');
+        alert('⚠️ Tu sesión de Google ha expirado. Serás redirigido para reconectarte.');
+        
+        // Limpiar tokens y forzar reconexión
+        localStorage.removeItem('google-auth-storage');
+        
+        // Redirigir a reconexión después de 2 segundos
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+        
+        return;
+      }
+      
       setCrmClients([]);
     } finally {
       setCrmLoading(false);
@@ -355,24 +419,26 @@ export const Quotations: React.FC = () => {
       let url: string;
       let headers: HeadersInit = {};
       
-      if (accessToken) {
-        try {
-          const validToken = await getValidToken();
-          url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}`;
-          headers['Authorization'] = `Bearer ${validToken}`;
-        } catch (err) {
-          console.error('Error al obtener token válido:', err);
-          // Fallback a API Key
-          url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
-        }
-      } else {
-        url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
-      }
+      // Por ahora, usar solo API Key para evitar problemas de permisos
+      // TODO: Implementar verificación de permisos OAuth más robusta
+      console.log('🔑 Usando API Key para acceder al sheet de cotizaciones');
+      url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}?key=${GOOGLE_API_KEY}`;
       
+      console.log('🔗 URL de consulta:', url);
       const response = await fetch(url, { headers });
       
       if (!response.ok) {
-        throw new Error('Error al obtener datos del Google Sheet');
+        const errorText = await response.text();
+        console.error('❌ Error en respuesta del servidor:', response.status, response.statusText);
+        console.error('❌ Detalles del error:', errorText);
+        
+        if (response.status === 401) {
+          throw new Error('No autorizado para acceder a este Google Sheet. Verifica que el sheet esté compartido con tu cuenta de Google.');
+        } else if (response.status === 403) {
+          throw new Error('Permisos insuficientes para acceder a este Google Sheet.');
+        } else {
+          throw new Error(`Error al obtener datos del Google Sheet: ${response.status} ${response.statusText}`);
+        }
       }
       
       const data = await response.json();
@@ -637,75 +703,34 @@ export const Quotations: React.FC = () => {
       if (code && state === 'quotations_auth') {
         console.log('🔑 Código de autorización recibido:', code);
         
-        try {
-          const tokens = await exchangeCodeForTokens(code);
-          console.log('🔑 Tokens obtenidos:', tokens);
-          
-          saveTokensToStorage(tokens.access_token, tokens.refresh_token, tokens.expires_in);
-          setAccessToken(tokens.access_token);
-          setIsAuthenticated(true);
-          
-          // Limpiar la URL
-          window.history.replaceState({}, document.title, window.location.pathname);
-          
-          // Cargar datos después de autenticación
-          fetchGoogleSheetData();
-          fetchCrmClients();
-          fetchQuotations();
-        } catch (err) {
-          console.error('Error al intercambiar código por tokens:', err);
-          setError('Error en la autenticación con Google');
-        }
+        // El callback de OAuth ya se maneja en App.tsx
+        // Solo limpiar la URL y cargar datos
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Cargar datos después de autenticación
+        fetchGoogleSheetData();
+        fetchCrmClients();
+        fetchQuotations();
       }
     };
 
     const loadData = async () => {
       console.log('🔄 Cargando datos de cotizaciones...');
       
-      // Verificar si hay token válido
-      if (isTokenValid()) {
-        const token = localStorage.getItem('google_access_token_quotations');
-        setAccessToken(token);
-        setIsAuthenticated(true);
-        console.log('🔑 Token OAuth2 válido encontrado, cargando desde Google Sheets...');
+      // Verificar si ya estamos autenticados con el servicio centralizado
+      if (isAuthenticated && accessToken) {
+        console.log('🔑 Ya autenticado con servicio centralizado, cargando desde Google Sheets...');
+        fetchGoogleSheetData();
+        fetchCrmClients();
+        fetchQuotations();
+      } else if (GOOGLE_API_KEY) {
+        console.log('🔑 API Key encontrada, cargando desde Google Sheets...');
         fetchGoogleSheetData();
         fetchCrmClients();
         fetchQuotations();
       } else {
-        // Token expirado o no existe, intentar renovar si hay refresh token
-        const refreshToken = localStorage.getItem('google_refresh_token_quotations');
-        if (refreshToken) {
-          console.log('🔄 Token expirado, intentando renovar con refresh token...');
-          try {
-            const newToken = await refreshAccessToken();
-            setAccessToken(newToken);
-            setIsAuthenticated(true);
-            console.log('✅ Token renovado exitosamente, cargando desde Google Sheets...');
-            fetchGoogleSheetData();
-            fetchCrmClients();
-            fetchQuotations();
-            return;
-          } catch (err) {
-            console.error('❌ Error al renovar token:', err);
-            // Si falla la renovación, limpiar tokens y continuar con API Key
-            localStorage.removeItem('google_access_token_quotations');
-            localStorage.removeItem('google_refresh_token_quotations');
-            localStorage.removeItem('google_token_expiry_quotations');
-            setAccessToken(null);
-            setIsAuthenticated(false);
-          }
-        }
-        
-        // Si no hay refresh token o falló la renovación, usar API Key
-        if (GOOGLE_API_KEY) {
-          console.log('🔑 API Key encontrada, cargando desde Google Sheets...');
-          fetchGoogleSheetData();
-          fetchCrmClients();
-          fetchQuotations();
-        } else {
-          console.log('⚠️ Sin autenticación, cargando datos de ejemplo...');
-          setLoading(false);
-        }
+        console.log('⚠️ Sin autenticación, cargando datos de ejemplo...');
+        setLoading(false);
       }
     };
 
@@ -837,7 +862,7 @@ export const Quotations: React.FC = () => {
         quotation.total || 0,
         quotation.status || 'pending',
         quotation.createdAt || new Date().toISOString().split('T')[0],
-        quotation.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        quotation.validUntil || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         quotation.items.length || 0,
         JSON.stringify(quotation.items) // Guardar items como JSON
       ];
@@ -848,7 +873,7 @@ export const Quotations: React.FC = () => {
       
       if (accessToken) {
         try {
-          const validToken = await getValidToken();
+          const validToken = await getValidAccessToken();
           url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${GOOGLE_SHEET_NAME}:append?valueInputOption=USER_ENTERED`;
           headers['Authorization'] = `Bearer ${validToken}`;
         } catch (err) {
@@ -903,7 +928,7 @@ export const Quotations: React.FC = () => {
         subtotal: currentQuotation.subtotal,
         discount: currentQuotation.discount || 0,
         discountType: currentQuotation.discountType || 'percentage',
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
         items: currentQuotation.items
       };
 
@@ -1057,8 +1082,172 @@ export const Quotations: React.FC = () => {
     });
   };
 
-  // Función para generar PDF con logo y formato profesional
+  // Función para generar PDF con jsPDF (sin enlaces blob visibles)
   const generatePDF = async (quotation: any) => {
+    try {
+      // Crear nuevo documento PDF
+      const doc = new jsPDF();
+      
+      // Configurar colores
+      const primaryColor = [102, 126, 234]; // #667eea
+      
+      // Convertir logo a base64
+      let logoBase64 = '';
+      try {
+        logoBase64 = await convertImageToBase64(logoImage);
+        console.log('✅ Logo convertido a base64 exitosamente');
+        
+        // Agregar logo al PDF (manteniendo proporción original)
+        // Calcular proporción para mantener aspect ratio
+        const logoWidth = 30;
+        const logoHeight = 20; // Mantener proporción h-20 w-auto
+        doc.addImage(logoBase64, 'PNG', 80, 10, logoWidth, logoHeight);
+      } catch (err) {
+        console.warn('⚠️ No se pudo convertir el logo, usando logo por defecto:', err);
+        // Logo por defecto si falla la conversión
+        logoBase64 = 'data:image/svg+xml;base64,' + btoa(`
+          <svg width="80" height="80" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="40" cy="40" r="40" fill="url(#gradient)"/>
+            <defs>
+              <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#667eea"/>
+                <stop offset="100%" style="stop-color:#764ba2"/>
+              </linearGradient>
+            </defs>
+            <text x="40" y="48" text-anchor="middle" fill="white" font-size="24" font-weight="bold">CL</text>
+          </svg>
+        `);
+        const logoWidth = 30;
+        const logoHeight = 20;
+        doc.addImage(logoBase64, 'PNG', 80, 10, logoWidth, logoHeight);
+      }
+      
+      // Línea separadora
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(0.5);
+      doc.line(20, 40, 190, 40);
+      
+      // Información de la cotización
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text('INFORMACIÓN DE LA COTIZACIÓN', 20, 55);
+      
+      // Datos del cliente y proyecto
+      doc.setFontSize(10);
+      doc.text(`Cliente: ${quotation.clientName || 'Cliente por definir'}`, 20, 65);
+      doc.text(`Proyecto: ${quotation.projectName || 'Proyecto por definir'}`, 20, 70);
+      doc.text(`Fecha: ${quotation.createdAt || new Date().toLocaleDateString()}`, 110, 65);
+      doc.text(`Válida hasta: ${quotation.validUntil || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toLocaleDateString()}`, 110, 70);
+      
+      // Tabla de productos/servicios
+      doc.setFontSize(12);
+      doc.text('DETALLE DE PRODUCTOS/SERVICIOS', 20, 110);
+      
+      // Encabezados de la tabla
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(20, 115, 170, 12, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Descripción', 25, 122);
+      doc.text('Cantidad', 120, 122);
+      doc.text('Precio Unit.', 145, 122);
+      doc.text('Total', 170, 122);
+      
+      // Filas de productos
+      let yPosition = 135;
+      let subtotal = 0;
+      
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+      quotation.items.forEach((item: any, index: number) => {
+        if (yPosition > 250) {
+          doc.addPage();
+          yPosition = 30;
+        }
+        
+        const itemTotal = (item.price || 0) * (item.quantity || 1);
+        subtotal += itemTotal;
+        
+        // Alternar color de fondo
+        if (index % 2 === 0) {
+          doc.setFillColor(248, 249, 250);
+          doc.rect(20, yPosition - 5, 170, 12, 'F');
+        }
+        
+        // Mostrar clave y nombre del producto
+        const productCode = item.code || item.sku || '';
+        const productName = item.description || item.name || item.title || 'Producto/Servicio';
+        const productDisplay = productCode ? `${productCode} - ${productName}` : productName;
+        
+        // Ajustar tamaño de fuente para mejor legibilidad
+        doc.setFontSize(9);
+        doc.text(productDisplay, 25, yPosition + 2);
+        doc.setFontSize(10);
+        doc.text((item.quantity || 1).toString(), 120, yPosition + 2);
+        doc.text(`$${(item.price || 0).toLocaleString()}`, 145, yPosition + 2);
+        doc.text(`$${itemTotal.toLocaleString()}`, 170, yPosition + 2);
+        
+        yPosition += 12;
+      });
+      
+      // Totales
+      yPosition += 15;
+      doc.setFontSize(10);
+      doc.text('Subtotal:', 145, yPosition);
+      doc.text(`$${subtotal.toLocaleString()}`, 170, yPosition);
+      
+      if (quotation.discount > 0) {
+        const discountAmount = quotation.discountType === 'percentage' 
+          ? (subtotal * quotation.discount / 100)
+          : quotation.discount;
+        
+        yPosition += 10;
+        doc.text(`Descuento ${quotation.discountType === 'percentage' ? `(${quotation.discount}%)` : ''}:`, 145, yPosition);
+        doc.text(`-$${discountAmount.toLocaleString()}`, 170, yPosition);
+        
+        yPosition += 10;
+        doc.setFontSize(12);
+        doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.setFont('helvetica', 'bold');
+        doc.text('TOTAL:', 145, yPosition);
+        doc.text(`$${(subtotal - discountAmount).toLocaleString()}`, 170, yPosition);
+      } else {
+        yPosition += 10;
+        doc.setFontSize(12);
+        doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.setFont('helvetica', 'bold');
+        doc.text('TOTAL:', 145, yPosition);
+        doc.text(`$${subtotal.toLocaleString()}`, 170, yPosition);
+      }
+      
+      // Nota de validez
+      yPosition += 20;
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text('Nota: Esta cotización es válida por 15 días a partir de la fecha de emisión.', 20, yPosition);
+      doc.text('Los precios están sujetos a cambios sin previo aviso.', 20, yPosition + 5);
+      
+      // Pie de página
+      doc.setFontSize(8);
+      doc.text('© ' + new Date().getFullYear() + ' Colorland. Todos los derechos reservados.', 105, 285, { align: 'center' });
+      
+      // Generar nombre del archivo
+      const fileName = `cotizacion-${quotation.clientName || 'cliente'}-${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      // Descargar el PDF
+      doc.save(fileName);
+      
+      console.log('✅ PDF generado exitosamente con jsPDF');
+      
+    } catch (err) {
+      console.error('Error al generar PDF:', err);
+      alert('Error al generar el PDF');
+    }
+  };
+
+  // Función antigua para generar PDF con HTML (mantener como respaldo)
+  const generatePDFOld = async (quotation: any) => {
     try {
       // Convertir logo a base64
       let logoBase64 = '';
@@ -1314,17 +1503,19 @@ export const Quotations: React.FC = () => {
       // Crear URL del blob
       const url = URL.createObjectURL(blob);
       
-      // Abrir en nueva ventana para imprimir/guardar como PDF
-      const printWindow = window.open(url, '_blank');
+      // Crear un enlace temporal para descarga
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `cotizacion-${quotation.clientName || 'cliente'}-${new Date().toISOString().split('T')[0]}.html`;
+      link.style.display = 'none';
       
-      if (printWindow) {
-        printWindow.onload = () => {
-          printWindow.print();
-        };
-      }
+      // Agregar al DOM temporalmente, hacer clic y remover
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       
-      // Limpiar URL después de un tiempo
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      // Limpiar URL inmediatamente
+      URL.revokeObjectURL(url);
       
       console.log('✅ PDF generado exitosamente con logo');
       
@@ -1484,14 +1675,25 @@ export const Quotations: React.FC = () => {
                         <RefreshCw className="w-4 h-4 mr-2" />
                         Actualizar
                       </Button>
-                      {!accessToken && GOOGLE_CLIENT_ID && (
+                      {!isAuthenticated && GOOGLE_CLIENT_ID && (
                         <Button 
                           onClick={authenticateWithGoogle} 
                           variant="outline"
                           className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                          disabled={authLoading}
                         >
                           <CheckCircle className="w-4 h-4 mr-2" />
-                          Conectar con Google
+                          {authLoading ? 'Conectando...' : 'Conectar con Google'}
+                        </Button>
+                      )}
+                      {isAuthenticated && GOOGLE_CLIENT_ID && (
+                        <Button 
+                          onClick={reconnectWithGoogle} 
+                          variant="outline"
+                          className="bg-orange-50 text-orange-700 hover:bg-orange-100"
+                        >
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Reconectar Google
                         </Button>
                       )}
                     </div>
@@ -2296,7 +2498,7 @@ export const Quotations: React.FC = () => {
                 clientName: currentQuotation.clientName || 'Cliente por definir',
                 projectName: currentQuotation.projectName || 'Proyecto por definir',
                 createdAt: new Date().toISOString().split('T')[0],
-                validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
               };
               generatePDF(quotationToExport);
             } else {
@@ -2323,7 +2525,7 @@ export const Quotations: React.FC = () => {
                 clientName: currentQuotation.clientName || 'Cliente por definir',
                 projectName: currentQuotation.projectName || 'Proyecto por definir',
                 createdAt: new Date().toISOString().split('T')[0],
-                validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
               };
               generatePDF(quotationToExport);
             } else if (quotations.length > 0) {
@@ -2334,7 +2536,7 @@ export const Quotations: React.FC = () => {
                 items: quotations.flatMap(q => q.items),
                 total: quotations.reduce((sum, q) => sum + q.total, 0),
                 createdAt: new Date().toISOString().split('T')[0],
-                validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
               };
               generatePDF(allQuotationsReport);
             } else {
@@ -2727,6 +2929,33 @@ export const Quotations: React.FC = () => {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup de éxito para cliente agregado */}
+      {showSuccessPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                ¡Cliente Agregado Exitosamente!
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                El nuevo cliente ha sido guardado en el CRM de Google Sheets.
+              </p>
+              <Button
+                onClick={() => setShowSuccessPopup(false)}
+                className="w-full bg-green-600 hover:bg-green-700 text-white"
+              >
+                Cerrar
+              </Button>
             </div>
           </div>
         </div>
